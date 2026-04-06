@@ -403,9 +403,9 @@ Certificate Verification
 👨‍💻 Samarth Sase
 👨‍💻 Sarvesh Khot
 👩‍💻 Lavanya Devale
-🏫 Institution
 
-SMT. Indira Gandhi College of Engineering
+🏫 Institution
+SMT. Indira Gandhi College of Engineering, Ghansoli, Navi Mumbai
 
 📜 License
 
@@ -432,7 +432,7 @@ It allows institutions to securely issue, manage, and verify student certificate
 
 React.js for frontend (UI & user interaction)
 Node.js & Express.js for backend (API handling)
-MongoDB for storing certificate and user data
+MySQL for storing certificate and user data
 Ganache for local blockchain to ensure certificate authenticity”
 🔗 3. Frontend-Backend Connectivity
 
