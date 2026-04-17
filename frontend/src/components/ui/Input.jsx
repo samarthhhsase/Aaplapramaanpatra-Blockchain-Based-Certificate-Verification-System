@@ -12,7 +12,7 @@ export default function Input({ label, id, error, as = "input", className = "", 
   return (
     <div className="space-y-1.5">
       {label ? (
-        <label htmlFor={id} className="text-sm font-medium text-slate-700">
+        <label htmlFor={id} className="text-sm font-semibold text-slate-800">
           {label}
         </label>
       ) : null}

@@ -3,6 +3,7 @@ const path = require('path');
 const PDFDocument = require('pdfkit');
 const SVGtoPDF = require('svg-to-pdfkit');
 const QRCode = require('qrcode');
+const { getCertificateVerificationUrl } = require('./verificationUrlService');
 
 const COLORS = {
   page: '#fbf7ef',
@@ -109,19 +110,6 @@ function registerFonts(doc) {
 
 function getUniversityName(certificate) {
   return valueOrDash(certificate.university_name || process.env.UNIVERSITY_NAME || 'Sample University');
-}
-
-function getVerificationUrl(certificate) {
-  const rawBase =
-    process.env.FRONTEND_URL ||
-    process.env.VERIFY_BASE_URL ||
-    'http://localhost:5173/verify';
-  const normalizedBase = rawBase.endsWith('/verify')
-    ? rawBase
-    : `${rawBase.replace(/\/$/, '')}/verify`;
-  const certificateIdentifier = certificate.certificate_no || certificate.certificate_id || certificate.id;
-
-  return `${normalizedBase}/${encodeURIComponent(certificateIdentifier)}`;
 }
 
 function getStatusBadgeConfig(statusValue) {
@@ -435,9 +423,9 @@ function drawSignatureSection(doc, certificate, fonts) {
 
 function drawVerificationSection(doc, verificationUrl, qrBuffer, fonts) {
   const boxX = 608;
-  const boxY = 454;
+  const boxY = 446;
   const boxWidth = 170;
-  const boxHeight = 106;
+  const boxHeight = 118;
 
   doc.save();
   doc.roundedRect(boxX, boxY, boxWidth, boxHeight, 16).fill('#f8f3e8');
@@ -445,10 +433,10 @@ function drawVerificationSection(doc, verificationUrl, qrBuffer, fonts) {
   doc.restore();
 
   if (qrBuffer) {
-    doc.image(qrBuffer, boxX + 16, boxY + 12, { fit: [72, 72], align: 'center', valign: 'center' });
+    doc.image(qrBuffer, boxX + 14, boxY + 10, { fit: [88, 88], align: 'center', valign: 'center' });
   } else {
     doc.font(fonts.bodyItalic).fontSize(9).fillColor(COLORS.muted).text('QR unavailable', boxX + 16, boxY + 38, {
-      width: 72,
+      width: 88,
       align: 'center',
     });
   }
@@ -457,9 +445,9 @@ function drawVerificationSection(doc, verificationUrl, qrBuffer, fonts) {
     width: 58,
     align: 'left',
   });
-  doc.font(fonts.bodyRegular).fontSize(7.3).fillColor(COLORS.muted).text(verificationUrl, boxX + 96, boxY + 62, {
+  doc.font(fonts.bodyRegular).fontSize(7.3).fillColor(COLORS.muted).text(verificationUrl, boxX + 96, boxY + 66, {
     width: 58,
-    height: 26,
+    height: 34,
   });
 }
 
@@ -562,22 +550,24 @@ async function buildCertificatePdf(certificate) {
     doc.on('error', reject);
   });
 
-  const verificationUrl = getVerificationUrl(certificate);
+  const certificateIdentifier = certificate.certificate_no || certificate.certificate_id || certificate.id;
+  const verificationUrl = await getCertificateVerificationUrl(certificateIdentifier);
   const subjects = Array.isArray(certificate.subjects) ? certificate.subjects : [];
 
   let qrBuffer = null;
   try {
-    const qrDataUrl = await QRCode.toDataURL(verificationUrl, {
-      width: 132,
-      margin: 1,
-      errorCorrectionLevel: 'M',
+    qrBuffer = await QRCode.toBuffer(verificationUrl, {
+      type: 'png',
+      width: 320,
+      margin: 2,
+      errorCorrectionLevel: 'H',
       color: {
         dark: '#2d2416',
-        light: '#0000',
+        light: '#FFFFFFFF',
       },
     });
-    qrBuffer = Buffer.from(qrDataUrl.replace(/^data:image\/png;base64,/, ''), 'base64');
   } catch (error) {
+    console.warn('[PDF] Failed to generate certificate QR:', error.message);
     qrBuffer = null;
   }
 

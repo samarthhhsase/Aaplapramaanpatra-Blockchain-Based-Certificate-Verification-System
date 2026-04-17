@@ -123,8 +123,8 @@ function StatusBadge({ status, t }) {
 function ResultField({ label, value }) {
   return (
     <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{label}</p>
-      <p className="mt-2 break-all text-sm font-medium text-slate-800">{value || "-"}</p>
+      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-600">{label}</p>
+      <p className="mt-2 break-all text-sm font-semibold text-slate-900">{value || "-"}</p>
     </div>
   );
 }
@@ -233,17 +233,17 @@ export default function VerifyCertificate() {
 
       <div className="mx-auto w-full max-w-6xl space-y-6 px-4 py-6 sm:px-6 sm:py-8 md:py-10">
         <section className="gov-card overflow-hidden">
-          <div className="gov-hero-panel gov-grid-pattern px-4 py-6 text-white sm:px-6 sm:py-8 lg:px-8">
+          <div className="bg-gradient-to-br from-white via-slate-50 to-blue-50 px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
             <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-blue-100 sm:text-sm sm:tracking-[0.28em]">{t("publicVerification")}</p>
-                <h1 className="mt-3 text-2xl font-black tracking-tight sm:text-3xl lg:text-4xl">{t("verifyCertificate")}</h1>
-                <p className="mt-3 max-w-2xl text-sm text-blue-50 sm:text-base">
+                <p className="text-xs font-bold uppercase tracking-[0.24em] text-[#0B5ED7] sm:text-sm sm:tracking-[0.28em]">{t("publicVerification")}</p>
+                <h1 className="mt-3 text-2xl font-black tracking-tight text-slate-900 sm:text-3xl lg:text-4xl">{t("verifyCertificate")}</h1>
+                <p className="mt-3 max-w-2xl text-sm font-medium leading-6 text-slate-700 sm:text-base">
                   Enter the certificate ID to verify authenticity through institutional records and blockchain-backed validation.
                 </p>
               </div>
-              <div className="w-full max-w-sm rounded-3xl bg-white/10 p-4 backdrop-blur sm:p-5">
-                <Logo light />
+              <div className="w-full max-w-sm rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+                <Logo />
               </div>
             </div>
           </div>
@@ -282,19 +282,19 @@ export default function VerifyCertificate() {
                   <FaShieldAlt />
                 </div>
                 <div>
-                  <p className="text-sm font-semibold text-[#0A3D62]">{t("publicCertificateCheck")}</p>
-                  <p className="text-sm text-slate-600">Matches the certificate number against the issued records and the latest certificate status.</p>
+                  <p className="text-sm font-bold text-slate-900">{t("publicCertificateCheck")}</p>
+                  <p className="text-sm leading-6 text-slate-700">Matches the certificate number against the issued records and the latest certificate status.</p>
                 </div>
               </div>
             </div>
 
             <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-4 sm:p-5">
-              <label className="flex min-h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3 text-center text-sm font-semibold text-slate-700 transition hover:border-blue-300 hover:bg-blue-50">
+              <label className="flex min-h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3 text-center text-sm font-semibold text-slate-800 transition hover:border-blue-300 hover:bg-blue-50">
                 <FaUpload />
                 {t("uploadQrImage")}
                 <input type="file" accept="image/*" className="hidden" onChange={handleQrUpload} />
               </label>
-              <p className="mt-3 flex items-center gap-2 text-xs text-slate-500">
+              <p className="mt-3 flex items-center gap-2 text-xs font-medium text-slate-600">
                 <FaQrcode />
                 Scan to verify certificate authenticity. {t("qrUploadHint")}
               </p>
@@ -333,8 +333,8 @@ export default function VerifyCertificate() {
           <Card className="gov-card border-none p-4 sm:p-6 lg:p-8">
             <div className="mx-auto max-w-4xl text-center">
               <p className="gov-section-title">{t("certificateResult")}</p>
-              <h2 className="mt-3 text-2xl font-black text-[#0A3D62] sm:text-3xl">Official Certificate Status Card</h2>
-              <p className="mt-3 text-sm text-slate-600">
+              <h2 className="mt-3 text-2xl font-black text-slate-900 sm:text-3xl">Official Certificate Status Card</h2>
+              <p className="mt-3 text-sm leading-6 text-slate-700">
                 Verified result for certificate <span className="font-semibold text-slate-900">{certificate.certificate_id}</span>
               </p>
             </div>
@@ -342,9 +342,9 @@ export default function VerifyCertificate() {
             <div className="mx-auto mt-6 max-w-4xl rounded-[24px] border border-slate-200 bg-white p-4 shadow-[0_12px_32px_rgba(15,23,42,0.08)] sm:mt-8 sm:rounded-[28px] sm:p-6 lg:p-8">
               <div className="flex flex-col gap-4 border-b border-slate-200 pb-6 md:flex-row md:items-start md:justify-between">
                 <div className="text-center md:text-left">
-                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[#0B5ED7] sm:text-sm sm:tracking-[0.3em]">AaplaPramaanPatra</p>
-                  <h3 className="mt-2 break-words text-xl font-black text-[#0A3D62] sm:text-2xl">{certificate.student_name}</h3>
-                  <p className="mt-1 text-sm text-slate-600">{certificate.course || "-"}</p>
+                  <p className="text-xs font-bold uppercase tracking-[0.24em] text-[#0B5ED7] sm:text-sm sm:tracking-[0.3em]">AaplaPramaanPatra</p>
+                  <h3 className="mt-2 break-words text-xl font-black text-slate-900 sm:text-2xl">{certificate.student_name}</h3>
+                  <p className="mt-1 text-sm font-medium text-slate-700">{certificate.course || "-"}</p>
                 </div>
                 <div className="flex justify-center md:justify-end">
                   <StatusBadge status={certificate.status} t={t} />
@@ -363,9 +363,9 @@ export default function VerifyCertificate() {
               </div>
 
               <div className="mt-6 rounded-3xl border border-blue-100 bg-blue-50 p-4 sm:p-5">
-                <p className="text-sm font-semibold text-[#0A3D62]">Status Summary</p>
+                <p className="text-sm font-bold text-slate-900">Status Summary</p>
                 <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <p className="text-sm leading-6 text-slate-600">
+                  <p className="text-sm leading-6 text-slate-700">
                     Student: <span className="font-semibold text-slate-900">{certificate.student_name}</span>{" "}
                     Course: <span className="font-semibold text-slate-900">{certificate.course || "-"}</span>{" "}
                     Issuer: <span className="font-semibold text-slate-900">{certificate.issuer_name || "-"}</span>
@@ -375,8 +375,8 @@ export default function VerifyCertificate() {
               </div>
 
               <div className="mt-6 rounded-3xl border border-slate-200 bg-slate-50 p-4 sm:p-5">
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{t("remarks")}</p>
-                <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-700">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-600">{t("remarks")}</p>
+                <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-800">
                   {certificate.remarks || t("noRemarksAdded")}
                 </p>
               </div>
