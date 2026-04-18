@@ -20,6 +20,7 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 const startupState = {
   databaseReady: false,
+  databaseCreated: false,
   schemaReady: false,
   blockchainReady: false,
   startupErrors: [],
@@ -102,8 +103,9 @@ async function startServer() {
   console.info('[SERVER START] Boot sequence started');
 
   try {
-    await testDatabaseConnection();
+    const dbState = await testDatabaseConnection();
     startupState.databaseReady = true;
+    startupState.databaseCreated = Boolean(dbState?.created);
   } catch (error) {
     startupState.startupErrors.push(`Database connection failed: ${error.message}`);
   }
@@ -130,6 +132,7 @@ async function startServer() {
     console.log(`Server running on port ${PORT}`);
     console.info(`[SERVER START] Listening on http://localhost:${PORT}`);
     console.info(`[DB CONNECTED] ${startupState.databaseReady ? 'yes' : 'no'}`);
+    console.info(`[DB CREATED] ${startupState.databaseCreated ? 'yes' : 'no'}`);
     console.info(`[DB SCHEMA] ${startupState.schemaReady ? 'ready' : 'not ready'}`);
     console.info(`[BLOCKCHAIN] ${startupState.blockchainReady ? 'ready' : 'degraded'}`);
     console.info('[CORS] Enabled for development');

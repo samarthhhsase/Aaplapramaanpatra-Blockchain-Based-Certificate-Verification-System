@@ -1,9 +1,8 @@
-DROP DATABASE IF EXISTS certificate_management;
-CREATE DATABASE certificate_management;
+CREATE DATABASE IF NOT EXISTS certificate_management;
 USE certificate_management;
 
 -- USERS TABLE
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS users (
   id INT AUTO_INCREMENT PRIMARY KEY,
   username VARCHAR(120) NOT NULL UNIQUE,
   email VARCHAR(150) NOT NULL UNIQUE,
@@ -14,7 +13,7 @@ CREATE TABLE users (
 );
 
 -- ADMINS TABLE
-CREATE TABLE admins (
+CREATE TABLE IF NOT EXISTS admins (
   id INT AUTO_INCREMENT PRIMARY KEY,
   school_name VARCHAR(255) NOT NULL,
   admin_name VARCHAR(150) NOT NULL,
@@ -25,7 +24,7 @@ CREATE TABLE admins (
 );
 
 -- ISSUERS TABLE
-CREATE TABLE issuers (
+CREATE TABLE IF NOT EXISTS issuers (
   id INT AUTO_INCREMENT PRIMARY KEY,
   user_id INT NOT NULL UNIQUE,
   admin_id INT NULL,
@@ -40,7 +39,7 @@ CREATE TABLE issuers (
 );
 
 -- STUDENTS TABLE
-CREATE TABLE students (
+CREATE TABLE IF NOT EXISTS students (
   id INT AUTO_INCREMENT PRIMARY KEY,
   user_id INT NOT NULL UNIQUE,
   name VARCHAR(150) NOT NULL,
@@ -55,7 +54,7 @@ CREATE TABLE students (
 );
 
 -- CERTIFICATES TABLE
-CREATE TABLE certificates (
+CREATE TABLE IF NOT EXISTS certificates (
   id INT AUTO_INCREMENT PRIMARY KEY,
   certificate_no VARCHAR(50) NOT NULL UNIQUE,
   student_id INT NOT NULL,
@@ -82,7 +81,7 @@ CREATE TABLE certificates (
   FOREIGN KEY (issuer_id) REFERENCES issuers(id) ON DELETE CASCADE
 );
 
-CREATE TABLE certificate_subjects (
+CREATE TABLE IF NOT EXISTS certificate_subjects (
   id INT AUTO_INCREMENT PRIMARY KEY,
   certificate_id INT NOT NULL,
   subject_name VARCHAR(255) NOT NULL,
@@ -94,7 +93,7 @@ CREATE TABLE certificate_subjects (
 );
 
 -- COMPLAINTS TABLE
-CREATE TABLE complaints (
+CREATE TABLE IF NOT EXISTS complaints (
   id INT AUTO_INCREMENT PRIMARY KEY,
   student_id INT NOT NULL,
   certificate_id INT NOT NULL,
@@ -108,7 +107,7 @@ CREATE TABLE complaints (
 );
 
 -- AUDIT LOGS TABLE
-CREATE TABLE audit_logs (
+CREATE TABLE IF NOT EXISTS audit_logs (
   id INT AUTO_INCREMENT PRIMARY KEY,
   user_id INT,
   action VARCHAR(100) NOT NULL,

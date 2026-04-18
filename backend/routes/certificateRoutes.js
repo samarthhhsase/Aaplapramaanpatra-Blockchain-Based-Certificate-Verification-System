@@ -6,6 +6,7 @@ const {
   deleteCertificate,
   verifyCertificate,
 } = require('../controllers/certificateController');
+const { updateCertificateMarks } = require('../controllers/issuerController');
 
 const router = express.Router();
 
@@ -20,6 +21,8 @@ router.get('/', (req, res) => {
 
 router.use(authenticate, authorizeRoles('issuer'));
 
+router.put('/:id', updateCertificateMarks);
+router.put('/:id/marks', updateCertificateMarks);
 router.post('/issue', issueCertificate);
 router.put('/revoke/:id', revokeCertificate);
 router.delete('/delete/:id', deleteCertificate);

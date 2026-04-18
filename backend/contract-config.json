@@ -1,5 +1,5 @@
 {
-  "contractAddress": "0xe97d27C5A2695E080D84f41A9e722a07a549E7A5",
+  "contractAddress": "0xa95DcA48B2f6A23355B73A10050ca86264B03784",
   "abi": [
     {
       "inputs": [],
@@ -75,6 +75,55 @@
       "type": "event"
     },
     {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "string",
+          "name": "certificateId",
+          "type": "string"
+        },
+        {
+          "indexed": false,
+          "internalType": "string",
+          "name": "previousCertificateHash",
+          "type": "string"
+        },
+        {
+          "indexed": false,
+          "internalType": "string",
+          "name": "nextCertificateHash",
+          "type": "string"
+        },
+        {
+          "indexed": false,
+          "internalType": "string",
+          "name": "studentName",
+          "type": "string"
+        },
+        {
+          "indexed": false,
+          "internalType": "string",
+          "name": "course",
+          "type": "string"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "issuerAddress",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "updatedAt",
+          "type": "uint256"
+        }
+      ],
+      "name": "CertificateUpdated",
+      "type": "event"
+    },
+    {
       "inputs": [
         {
           "internalType": "string",
@@ -124,6 +173,34 @@
         }
       ],
       "name": "revokeCertificate",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "string",
+          "name": "certificateId",
+          "type": "string"
+        },
+        {
+          "internalType": "string",
+          "name": "nextCertificateHash",
+          "type": "string"
+        },
+        {
+          "internalType": "string",
+          "name": "studentName",
+          "type": "string"
+        },
+        {
+          "internalType": "string",
+          "name": "course",
+          "type": "string"
+        }
+      ],
+      "name": "updateCertificate",
       "outputs": [],
       "stateMutability": "nonpayable",
       "type": "function"

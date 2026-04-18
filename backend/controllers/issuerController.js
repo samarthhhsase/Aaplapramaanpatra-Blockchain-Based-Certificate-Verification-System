@@ -83,6 +83,92 @@ function normalizeRemarks(value) {
   return normalized;
 }
 
+function hasFinalizedBlockchainRecord(certificate) {
+  const txHash = String(certificate?.blockchain_tx_hash || '').trim();
+  return Boolean(txHash) && txHash.toLowerCase() !== 'pending';
+}
+
+function normalizeCertificateLookupValue(value) {
+  const normalized = String(value || '').trim();
+  if (!normalized) {
+    return null;
+  }
+
+  const numericId = Number(normalized);
+  if (Number.isInteger(numericId) && numericId > 0 && String(numericId) === normalized) {
+    return { sql: 'c.id = ?', value: numericId };
+  }
+
+  return { sql: 'c.certificate_no = ?', value: normalized };
+}
+
+async function getIssuerCertificateByLookup(lookupValue, issuerId, connection = pool) {
+  const lookup = normalizeCertificateLookupValue(lookupValue);
+  if (!lookup) {
+    return null;
+  }
+
+  const [rows] = await connection.execute(
+    `SELECT
+       c.id,
+       c.certificate_no,
+       c.student_id,
+       c.issuer_id,
+       c.student_name,
+       c.course,
+       c.grade,
+       c.class,
+       c.student_type,
+       c.semester,
+       c.roll_no,
+       c.academic_year,
+       c.certificate_type,
+       c.remarks,
+       c.overall_percentage,
+       c.issue_date,
+       c.certificate_hash,
+       c.blockchain_tx_hash,
+       c.ipfs_hash,
+       c.status,
+       s.name AS resolved_student_name,
+       i.name AS issuer_name
+     FROM certificates c
+     JOIN students s ON c.student_id = s.id
+     JOIN issuers i ON c.issuer_id = i.id
+     WHERE ${lookup.sql} AND c.issuer_id = ?
+     LIMIT 1`,
+    [lookup.value, issuerId]
+  );
+
+  return rows[0] || null;
+}
+
+function mapCertificateMarksResponse(certificate, subjects) {
+  return {
+    id: certificate.id,
+    certificate_id: certificate.id,
+    certificate_no: certificate.certificate_no,
+    student_name: certificate.student_name || certificate.resolved_student_name,
+    course: certificate.course,
+    grade: certificate.grade,
+    issue_date: certificate.issue_date,
+    status: certificate.status,
+    overall_percentage:
+      certificate.overall_percentage === null || certificate.overall_percentage === undefined
+        ? null
+        : roundToTwo(certificate.overall_percentage),
+    certificate_hash: certificate.certificate_hash,
+    blockchain_tx_hash: certificate.blockchain_tx_hash,
+    ipfs_hash: certificate.ipfs_hash,
+    subjects: subjects.map((subject) => ({
+      ...subject,
+      marks_scored: Number(subject.marks_scored),
+      out_of: Number(subject.out_of),
+      subject_percentage: roundToTwo(subject.subject_percentage),
+    })),
+  };
+}
+
 async function generateUniqueCertificateNo() {
   for (let i = 0; i < 20; i += 1) {
     const certNo = generateCertificateNumber();
@@ -471,51 +557,114 @@ async function issueCertificate(req, res) {
 }
 
 async function editCertificate(req, res) {
+  return res.status(400).json({
+    success: false,
+    message: 'Use PUT /api/certificates/:id to update certificate marks and subjects.',
+  });
+}
+
+async function updateCertificateMarks(req, res) {
+  let connection;
+  let blockchainReceipt = null;
   try {
-    const { certNo } = req.params;
-    const { course, grade, remarks } = req.body || {};
-    const trimmedCourse = normalizeText(course);
-    const trimmedGrade = normalizeText(grade);
+    const lookupValue = req.params?.id || req.params?.certNo;
+    const issuerId = Number(req.user?.profileId);
+    const grade = normalizeText(req.body?.grade);
+    const requestedSubjects = Array.isArray(req.body?.subjects) ? req.body.subjects : null;
 
-    if (!trimmedCourse || !trimmedGrade) {
-      return res.status(400).json({ message: 'course and grade are required' });
+    if (!Number.isInteger(issuerId) || issuerId <= 0) {
+      return res.status(401).json({ success: false, message: 'Unauthorized: issuer profile missing' });
     }
 
-    let normalizedRemarks;
-    try {
-      normalizedRemarks = normalizeRemarks(remarks);
-    } catch (error) {
-      return res.status(400).json({ message: error.message });
+    if (!grade) {
+      return res.status(400).json({ success: false, message: 'grade is required' });
     }
 
-    const [rows] = await pool.execute(
-      `SELECT c.id, c.issue_date, c.status, c.class, c.student_type, c.semester, c.course, c.grade,
-              c.roll_no, c.academic_year, c.certificate_type, c.remarks, c.overall_percentage,
-              s.name AS student_name, i.name AS issuer_name
-       FROM certificates c
-       JOIN students s ON c.student_id = s.id
-       JOIN issuers i ON c.issuer_id = i.id
-       WHERE c.certificate_no = ? AND c.issuer_id = ?
-       LIMIT 1`,
-      [certNo, req.user.profileId]
-    );
-
-    if (rows.length === 0) {
-      return res.status(404).json({ message: 'Certificate not found' });
+    if (!requestedSubjects || requestedSubjects.length === 0) {
+      return res.status(400).json({ success: false, message: 'subjects are required' });
     }
 
-    const certificate = rows[0];
-    const subjectsByCertificateId = await getSubjectsByCertificateIds([certificate.id]);
-    const certificateSubjects = subjectsByCertificateId[certificate.id] || [];
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    const certificate = await getIssuerCertificateByLookup(lookupValue, issuerId, connection);
+    if (!certificate) {
+      await connection.rollback();
+      return res.status(404).json({ success: false, message: 'Certificate not found' });
+    }
+
     if (certificate.status === STATUS_REVOKED) {
-      return res.status(409).json({ message: 'Cannot edit revoked certificate' });
+      await connection.rollback();
+      return res.status(409).json({ success: false, message: 'Cannot edit marks for a revoked certificate' });
+    }
+
+    const subjectsByCertificateId = await getSubjectsByCertificateIds([certificate.id], connection);
+    const existingSubjects = subjectsByCertificateId[certificate.id] || [];
+    const existingSubjectsById = new Map(existingSubjects.map((subject) => [Number(subject.id), subject]));
+    const mergedSubjects = requestedSubjects.map((subject) => {
+      const rawSubjectId = subject?.id;
+      const subjectId = rawSubjectId === undefined || rawSubjectId === null || rawSubjectId === '' ? null : Number(rawSubjectId);
+
+      if (subjectId !== null) {
+        const existingSubject = existingSubjectsById.get(subjectId);
+        if (!existingSubject) {
+          throw new Error('Invalid subject row supplied for this certificate');
+        }
+
+        return {
+          id: subjectId,
+          isNew: false,
+          subject_name: normalizeText(subject?.subject_name) || existingSubject.subject_name,
+          marks_scored: subject?.marks_scored,
+          out_of: subject?.out_of === undefined || subject?.out_of === null || subject?.out_of === ''
+            ? existingSubject.out_of
+            : subject?.out_of,
+        };
+      }
+
+      const subjectName = normalizeText(subject?.subject_name);
+      if (!subjectName) {
+        throw new Error('subject_name is required for each new subject');
+      }
+
+      return {
+        id: null,
+        isNew: true,
+        subject_name: subjectName,
+        marks_scored: subject?.marks_scored,
+        out_of: subject?.out_of,
+      };
+    });
+
+    const submittedExistingIds = new Set(
+      mergedSubjects
+        .filter((subject) => subject.id !== null && subject.id !== undefined)
+        .map((subject) => Number(subject.id))
+    );
+    const missingExistingSubject = existingSubjects.find((subject) => !submittedExistingIds.has(Number(subject.id)));
+    if (missingExistingSubject) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: 'All existing subject rows must be included when editing marks',
+      });
+    }
+
+    let normalizedSubjects;
+    let nextOverallPercentage;
+    try {
+      normalizedSubjects = normalizeSubjects(mergedSubjects);
+      nextOverallPercentage = calculateOverallPercentage(normalizedSubjects);
+    } catch (error) {
+      await connection.rollback();
+      return res.status(400).json({ success: false, message: error.message, error: error.message });
     }
 
     const normalizedIssueDate = normalizeDate(certificate.issue_date);
-    const newHash = computeCertificateHash({
-      studentName: certificate.student_name,
-      course: trimmedCourse,
-      grade: trimmedGrade,
+    const nextCertificateHash = computeCertificateHash({
+      studentName: certificate.student_name || certificate.resolved_student_name,
+      course: certificate.course,
+      grade,
       className: certificate.class,
       studentType: certificate.student_type,
       semester: certificate.semester,
@@ -523,64 +672,112 @@ async function editCertificate(req, res) {
       rollNo: certificate.roll_no,
       academicYear: certificate.academic_year,
       certificateType: certificate.certificate_type,
-      remarks: normalizedRemarks,
-      overallPercentage: certificate.overall_percentage,
-      subjects: certificateSubjects,
+      remarks: certificate.remarks,
+      overallPercentage: nextOverallPercentage,
+      subjects: normalizedSubjects,
     });
 
-    const editedPdf = await buildCertificatePdf({
-      certificate_no: certNo,
-      student_name: certificate.student_name,
-      course: trimmedCourse,
-      grade: trimmedGrade,
-      class: certificate.class,
-      student_type: certificate.student_type,
-      semester: certificate.semester,
-      issue_date: normalizedIssueDate,
-      issuer_name: certificate.issuer_name,
-      certificate_hash: newHash,
-      blockchain_tx_hash: 'Pending',
-      status: certificate.status,
-      ipfs_hash: null,
-      roll_no: certificate.roll_no,
-      academic_year: certificate.academic_year,
-      certificate_type: certificate.certificate_type,
-      remarks: normalizedRemarks,
-      overall_percentage: roundToTwo(certificate.overall_percentage || 0),
-      subjects: certificateSubjects,
-    });
-    const infrastructureWarnings = ['Certificate content updated in MySQL. Re-issuing on chain is not supported for an existing certificate ID.'];
+    for (const subject of normalizedSubjects) {
+      if (subject.id) {
+        await connection.execute(
+          `UPDATE certificate_subjects
+           SET subject_name = ?, marks_scored = ?, out_of = ?, subject_percentage = ?
+           WHERE id = ? AND certificate_id = ?`,
+          [subject.subject_name, subject.marks_scored, subject.out_of, subject.subject_percentage, subject.id, certificate.id]
+        );
+      } else {
+        const [insertResult] = await connection.execute(
+          `INSERT INTO certificate_subjects (
+             certificate_id,
+             subject_name,
+             marks_scored,
+             out_of,
+             subject_percentage
+           ) VALUES (?, ?, ?, ?, ?)`,
+          [certificate.id, subject.subject_name, subject.marks_scored, subject.out_of, subject.subject_percentage]
+        );
+        subject.id = insertResult.insertId;
+      }
+    }
 
-    await pool.execute(
+    const studentName = certificate.student_name || certificate.resolved_student_name;
+    const certNo = certificate.certificate_no;
+    if (hasFinalizedBlockchainRecord(certificate)) {
+      blockchainReceipt = await blockchainService.updateCertificateOnChain({
+        certificateId: certNo,
+        certificateHash: nextCertificateHash,
+        studentName,
+        course: certificate.course,
+      });
+    }
+
+    await connection.execute(
       `UPDATE certificates
-       SET course = ?, grade = ?, remarks = ?, certificate_hash = ?, ipfs_hash = ?
+       SET grade = ?, overall_percentage = ?, certificate_hash = ?, blockchain_tx_hash = ?, updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
-      [trimmedCourse, trimmedGrade, normalizedRemarks, newHash, null, certificate.id]
+      [
+        grade,
+        nextOverallPercentage,
+        nextCertificateHash,
+        blockchainReceipt?.transactionHash || certificate.blockchain_tx_hash,
+        certificate.id,
+      ]
     );
+
+    const updatedCertificate = {
+      ...certificate,
+      grade,
+      overall_percentage: nextOverallPercentage,
+      certificate_hash: nextCertificateHash,
+      blockchain_tx_hash: blockchainReceipt?.transactionHash || certificate.blockchain_tx_hash,
+    };
+    const pdfPayload = {
+      ...updatedCertificate,
+      student_name: studentName,
+      issuer_name: updatedCertificate.issuer_name,
+      subjects: normalizedSubjects,
+    };
+    await buildCertificatePdf(pdfPayload);
 
     await logAudit({
       userId: req.user.userId,
-      action: 'EDIT_CERTIFICATE',
+      action: 'EDIT_CERTIFICATE_MARKS',
       certificateId: certificate.id,
-      oldData: { course: certificate.course, grade: certificate.grade, remarks: certificate.remarks },
-      newData: { course: trimmedCourse, grade: trimmedGrade, remarks: normalizedRemarks, warnings: infrastructureWarnings },
-    });
-
-    return res.status(200).json({
-      message: 'Certificate updated successfully',
-      certificate: {
-        certificateNo: certNo,
-        course: trimmedCourse,
-        grade: trimmedGrade,
-        remarks: normalizedRemarks,
-        certificateHash: newHash,
-        blockchainTxHash: null,
-        ipfsHash: null,
-        warnings: infrastructureWarnings,
+      oldData: {
+        grade: certificate.grade,
+        overall_percentage: certificate.overall_percentage,
+        subjects: existingSubjects,
+      },
+      newData: {
+        certificate_hash: nextCertificateHash,
+        blockchain_tx_hash: blockchainReceipt?.transactionHash || certificate.blockchain_tx_hash,
+        grade,
+        overall_percentage: nextOverallPercentage,
+        subjects: normalizedSubjects,
       },
     });
+
+    await connection.commit();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Certificate marks updated successfully',
+      certificate: mapCertificateMarksResponse(updatedCertificate, normalizedSubjects),
+    });
   } catch (error) {
-    return res.status(500).json({ message: 'Failed to edit certificate', error: error.message });
+    if (connection) {
+      await connection.rollback();
+    }
+
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to update certificate marks',
+      error: error.message,
+    });
+  } finally {
+    if (connection) {
+      connection.release();
+    }
   }
 }
 
@@ -932,6 +1129,7 @@ module.exports = {
   getStudents,
   issueCertificate,
   editCertificate,
+  updateCertificateMarks,
   revokeCertificate,
   getIssuedCertificates,
   getDashboardStats,

@@ -31,6 +31,16 @@ contract CertificateRegistry {
         uint256 revokedAt
     );
 
+    event CertificateUpdated(
+        string indexed certificateId,
+        string previousCertificateHash,
+        string nextCertificateHash,
+        string studentName,
+        string course,
+        address indexed issuerAddress,
+        uint256 updatedAt
+    );
+
     modifier onlyOwner() {
         require(msg.sender == owner, "Only owner");
         _;
@@ -115,5 +125,38 @@ contract CertificateRegistry {
         certificate.revoked = true;
 
         emit CertificateRevoked(certificateId, msg.sender, block.timestamp);
+    }
+
+    function updateCertificate(
+        string memory certificateId,
+        string memory nextCertificateHash,
+        string memory studentName,
+        string memory course
+    ) external onlyOwner {
+        require(bytes(certificateId).length > 0, "certificateId required");
+        require(bytes(nextCertificateHash).length > 0, "certificateHash required");
+        require(bytes(studentName).length > 0, "studentName required");
+        require(bytes(course).length > 0, "course required");
+
+        Certificate storage certificate = certificates[certificateId];
+        require(certificate.exists, "Certificate not found");
+        require(!certificate.revoked, "Certificate revoked");
+
+        string memory previousCertificateHash = certificate.certificateHash;
+        certificate.certificateHash = nextCertificateHash;
+        certificate.studentName = studentName;
+        certificate.course = course;
+        certificate.issuerAddress = msg.sender;
+        certificate.issuedAt = block.timestamp;
+
+        emit CertificateUpdated(
+            certificateId,
+            previousCertificateHash,
+            nextCertificateHash,
+            studentName,
+            course,
+            msg.sender,
+            block.timestamp
+        );
     }
 }

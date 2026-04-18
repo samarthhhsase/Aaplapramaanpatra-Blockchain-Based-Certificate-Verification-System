@@ -2,6 +2,6 @@
   "network": "ganache",
   "chainId": 1337,
   "rpcUrl": "http://127.0.0.1:7545",
-  "contractAddress": "0xe97d27C5A2695E080D84f41A9e722a07a549E7A5",
-  "deployedAt": "2026-04-17T07:04:04.324Z"
+  "contractAddress": "0xa95DcA48B2f6A23355B73A10050ca86264B03784",
+  "deployedAt": "2026-04-18T12:58:26.263Z"
 }

@@ -3,7 +3,7 @@ const { authenticate, authorizeRoles } = require('../middleware/auth');
 const {
   getStudents,
   issueCertificate,
-  editCertificate,
+  updateCertificateMarks,
   revokeCertificate,
   getIssuedCertificates,
   getDashboardStats,
@@ -21,7 +21,8 @@ router.use(authenticate, authorizeRoles('issuer'));
 router.get('/dashboard/stats', getDashboardStats);
 router.get('/students', getStudents);
 router.post('/certificates', issueCertificate);
-router.put('/certificates/:certNo', editCertificate);
+router.put('/certificates/:certNo/marks', updateCertificateMarks);
+router.put('/certificates/:certNo', updateCertificateMarks);
 router.delete('/certificates/:certNo', deleteCertificate);
 router.patch('/certificates/:certNo/revoke', revokeCertificate);
 router.get('/certificates', getIssuedCertificates);

@@ -34,14 +34,13 @@ const ISSUE_DEFAULTS = {
 };
 
 const EDIT_FORM_DEFAULTS = {
-  course: "",
   grade: "",
-  remarks: "",
+  subjects: [],
 };
 
 const EDIT_FORM_ERROR_DEFAULTS = {
   grade: "",
-  remarks: "",
+  subjects: "",
 };
 
 function createSubjectRow() {
@@ -57,6 +56,27 @@ function createDefaultIssueForm() {
   return {
     ...ISSUE_DEFAULTS,
     subjects: [createSubjectRow()],
+  };
+}
+
+function createEditSubjectRow(subject) {
+  return {
+    id: subject.id,
+    subject_name: subject.subject_name || "",
+    marks_scored: subject.marks_scored ?? "",
+    out_of: subject.out_of ?? "",
+    subject_percentage: subject.subject_percentage ?? 0,
+  };
+}
+
+function createNewEditSubjectRow() {
+  return {
+    id: `new-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    subject_name: "",
+    marks_scored: "",
+    out_of: "",
+    subject_percentage: 0,
+    isNew: true,
   };
 }
 
@@ -169,6 +189,22 @@ export default function IssuerDashboard() {
     [issueForm.subjects]
   );
   const overallPercentage = useMemo(() => calculateOverallPercentage(calculatedSubjects), [calculatedSubjects]);
+  const calculatedEditSubjects = useMemo(
+    () =>
+      editForm.subjects.map((subject) => {
+        const scored = toNumber(subject.marks_scored);
+        const outOf = toNumber(subject.out_of);
+        return {
+          ...subject,
+          subject_percentage: toPercentage(scored, outOf),
+        };
+      }),
+    [editForm.subjects]
+  );
+  const editOverallPercentage = useMemo(
+    () => (calculatedEditSubjects.length > 0 ? calculateOverallPercentage(calculatedEditSubjects) : 0),
+    [calculatedEditSubjects]
+  );
 
   const fetchAll = async () => {
     setLoading(true);
@@ -357,9 +393,10 @@ export default function IssuerDashboard() {
     }
     setSelectedCertificate(certificate);
     setEditForm({
-      course: certificate.course || "",
       grade: certificate.grade || "",
-      remarks: certificate.remarks || "",
+      subjects: Array.isArray(certificate.subjects)
+        ? certificate.subjects.map((subject) => createEditSubjectRow(subject))
+        : [],
     });
     setEditErrors(EDIT_FORM_ERROR_DEFAULTS);
     setIsEditModalOpen(true);
@@ -370,9 +407,41 @@ export default function IssuerDashboard() {
 
   const updateEditForm = (key, value) => {
     setEditForm((prev) => ({ ...prev, [key]: value }));
-    if (key === "grade" || key === "remarks") {
+    if (key === "grade") {
       setEditErrors((prev) => (prev[key] ? { ...prev, [key]: "" } : prev));
     }
+  };
+
+  const addEditSubjectRow = () => {
+    setEditForm((prev) => ({
+      ...prev,
+      subjects: [...prev.subjects, createNewEditSubjectRow()],
+    }));
+    setEditErrors((prev) => (prev.subjects ? { ...prev, subjects: "" } : prev));
+  };
+
+  const updateEditSubject = (subjectId, key, value) => {
+    setEditForm((prev) => ({
+      ...prev,
+      subjects: prev.subjects.map((subject) =>
+        subject.id === subjectId ? { ...subject, [key]: value } : subject
+      ),
+    }));
+    setEditErrors((prev) => (prev.subjects ? { ...prev, subjects: "" } : prev));
+  };
+
+  const removeEditSubject = (subjectId) => {
+    setEditForm((prev) => {
+      if (prev.subjects.length === 1) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        subjects: prev.subjects.filter((subject) => subject.id !== subjectId),
+      };
+    });
+    setEditErrors((prev) => (prev.subjects ? { ...prev, subjects: "" } : prev));
   };
 
   const saveCertificateEdits = async () => {
@@ -380,56 +449,81 @@ export default function IssuerDashboard() {
       return;
     }
 
-    const trimmedCourse = editForm.course.trim();
     const trimmedGrade = editForm.grade.trim();
-    const trimmedRemarks = editForm.remarks.trim();
+    const nextSubjects = calculatedEditSubjects;
     const nextErrors = {
       grade: trimmedGrade ? "" : "Grade is required",
-      remarks: trimmedRemarks ? "" : "Remarks are required",
+      subjects: "",
     };
 
-    if (nextErrors.grade || nextErrors.remarks) {
+    if (nextSubjects.length === 0) {
+      nextErrors.subjects = "At least one subject row is required";
+    } else {
+      const invalidSubject = nextSubjects.find((subject) => {
+        const scored = Number(subject.marks_scored);
+        const outOf = Number(subject.out_of);
+        return (
+          !String(subject.subject_name || "").trim() ||
+          !Number.isFinite(scored) ||
+          scored < 0 ||
+          !Number.isFinite(outOf) ||
+          outOf <= 0 ||
+          scored > outOf
+        );
+      });
+
+      if (invalidSubject) {
+        nextErrors.subjects = `Enter a subject name and valid marks for ${invalidSubject.subject_name || "the new row"}.`;
+      }
+    }
+
+    if (nextErrors.grade || nextErrors.subjects) {
       setEditErrors(nextErrors);
       return;
     }
 
-    if (trimmedRemarks.length > 500) {
-      setError(t("remarksTooLong"));
+    if (!window.confirm(`Save updated marks for certificate ${selectedCertificate.certificate_no}?`)) {
       return;
     }
 
     try {
       setIsSavingEdit(true);
-      const response = await apiRequest(`/issuer/certificates/${encodeURIComponent(selectedCertificate.certificate_no)}`, {
+      const response = await apiRequest(`/certificates/${encodeURIComponent(selectedCertificate.id)}`, {
         method: "PUT",
         body: {
-          course: trimmedCourse,
           grade: trimmedGrade,
-          remarks: trimmedRemarks,
+          subjects: nextSubjects.map((subject) => ({
+            id: String(subject.id).startsWith("new-") ? undefined : subject.id,
+            subject_name: subject.subject_name.trim(),
+            marks_scored: Number(subject.marks_scored),
+            out_of: Number(subject.out_of),
+          })),
         },
       });
 
       setCertificates((prev) =>
         prev.map((certificate) =>
-          certificate.certificate_no === selectedCertificate.certificate_no
+          certificate.id === selectedCertificate.id
             ? {
                 ...certificate,
-                course: trimmedCourse,
-                grade: trimmedGrade,
-                remarks: trimmedRemarks || null,
-                certificate_hash: response?.certificate?.certificateHash || certificate.certificate_hash,
-                blockchain_tx_hash: response?.certificate?.blockchainTxHash ?? certificate.blockchain_tx_hash,
-                ipfs_hash: response?.certificate?.ipfsHash ?? certificate.ipfs_hash,
+                grade: response?.certificate?.grade || trimmedGrade,
+                overall_percentage: response?.certificate?.overall_percentage ?? certificate.overall_percentage,
+                certificate_hash: response?.certificate?.certificate_hash || certificate.certificate_hash,
+                blockchain_tx_hash: response?.certificate?.blockchain_tx_hash ?? certificate.blockchain_tx_hash,
+                ipfs_hash: response?.certificate?.ipfs_hash ?? certificate.ipfs_hash,
+                subjects: response?.certificate?.subjects || certificate.subjects,
               }
             : certificate
         )
       );
 
-      setSuccess(response?.message || `Certificate ${selectedCertificate.certificate_no} updated.`);
+      setSuccess(response?.message || `Certificate ${selectedCertificate.certificate_no} marks updated.`);
       closeEditModal(true);
-      showToast("success", "Certificate updated successfully");
+      showToast("success", response?.message || "Certificate marks updated successfully");
     } catch (err) {
-      showToast("error", "Failed to update certificate");
+      const message = err.message || "Failed to update certificate marks";
+      setError(message);
+      showToast("error", message);
     } finally {
       setIsSavingEdit(false);
     }
@@ -797,7 +891,7 @@ export default function IssuerDashboard() {
                               className="w-full min-w-[120px] rounded-lg px-4 py-2 text-sm sm:flex-1"
                               onClick={() => openEditModal(certificate)}
                             >
-                              {t("edit")}
+                              Edit Marks
                             </Button>
                             <Button
                               variant="secondary"
@@ -884,7 +978,7 @@ export default function IssuerDashboard() {
         >
           <div
             className={[
-              "w-full max-w-xl rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_28px_70px_rgba(15,23,42,0.22)] transition-all duration-200 sm:p-6",
+              "w-full max-w-3xl rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_28px_70px_rgba(15,23,42,0.22)] transition-all duration-200 sm:p-6",
               isEditModalVisible ? "scale-100 opacity-100" : "scale-95 opacity-0",
             ].join(" ")}
             onClick={(event) => event.stopPropagation()}
@@ -895,7 +989,7 @@ export default function IssuerDashboard() {
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h2 id="edit-certificate-title" className="text-xl font-bold text-slate-900">
-                  Edit Certificate
+                  Edit Marks
                 </h2>
                 <p className="mt-1 text-sm text-slate-500">
                   {selectedCertificate?.certificate_no ? `Certificate ${selectedCertificate.certificate_no}` : ""}
@@ -912,12 +1006,25 @@ export default function IssuerDashboard() {
             </div>
 
             <div className="mt-6 space-y-4">
-              <Input
-                label={t("course")}
-                value={editForm.course}
-                onChange={(event) => updateEditForm("course", event.target.value)}
-                required
-              />
+              {selectedCertificate ? (
+                <div className="grid grid-cols-1 gap-3 rounded-[22px] border border-slate-200 bg-slate-50 p-4 sm:grid-cols-3">
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Student</p>
+                    <p className="mt-1 text-sm font-semibold text-slate-900">{selectedCertificate.student_name}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Course</p>
+                    <p className="mt-1 text-sm font-semibold text-slate-900">{selectedCertificate.course || "-"}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Current Overall</p>
+                    <p className="mt-1 text-sm font-semibold text-cyan-800">
+                      {selectedCertificate.overall_percentage !== null ? `${Number(selectedCertificate.overall_percentage).toFixed(2)}%` : "-"}
+                    </p>
+                  </div>
+                </div>
+              ) : null}
+
               <Input
                 label="Grade"
                 value={editForm.grade}
@@ -925,18 +1032,75 @@ export default function IssuerDashboard() {
                 onChange={(event) => updateEditForm("grade", event.target.value)}
                 required
               />
-              <div>
-                <Input
-                  label={t("remarks")}
-                  as="textarea"
-                  rows={4}
-                  value={editForm.remarks}
-                  error={editErrors.remarks}
-                  onChange={(event) => updateEditForm("remarks", event.target.value)}
-                  placeholder={t("enterRemarksForStudent")}
-                  maxLength={500}
-                />
-                <p className="mt-2 text-right text-xs text-slate-500">{editForm.remarks.trim().length}/500 {t("characters")}</p>
+
+              <div className="space-y-4">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900">Subject-wise Marks</p>
+                    <p className="mt-1 text-xs text-slate-500">Update marks obtained. Percentages are recalculated automatically.</p>
+                  </div>
+                  <Button variant="secondary" className="px-4 py-2 text-sm" onClick={addEditSubjectRow}>
+                    <FaPlusCircle /> Add Subject
+                  </Button>
+                  <div className="rounded-2xl border border-cyan-200 bg-cyan-50 px-4 py-3 text-right">
+                    <p className="text-xs uppercase tracking-[0.18em] text-cyan-700">Updated Overall</p>
+                    <p className="mt-1 text-lg font-extrabold text-cyan-900">
+                      {calculatedEditSubjects.length > 0 ? `${editOverallPercentage.toFixed(2)}%` : "-"}
+                    </p>
+                  </div>
+                </div>
+
+                {editErrors.subjects ? (
+                  <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                    {editErrors.subjects}
+                  </div>
+                ) : null}
+
+                <div className="space-y-3">
+                  {calculatedEditSubjects.map((subject, index) => (
+                    <div key={subject.id} className="grid grid-cols-1 gap-3 rounded-[22px] border border-slate-200 bg-white p-4 md:grid-cols-[minmax(0,1.2fr)_120px_120px_140px_110px]">
+                      <Input
+                        label="Subject Name"
+                        value={subject.subject_name}
+                        onChange={(event) => updateEditSubject(subject.id, "subject_name", event.target.value)}
+                        placeholder={`Subject ${index + 1}`}
+                        required
+                      />
+                      <Input
+                        label="Marks"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={subject.marks_scored}
+                        onChange={(event) => updateEditSubject(subject.id, "marks_scored", event.target.value)}
+                        required
+                      />
+                      <Input
+                        label="Out Of"
+                        type="number"
+                        min="1"
+                        step="0.01"
+                        value={subject.out_of}
+                        onChange={(event) => updateEditSubject(subject.id, "out_of", event.target.value)}
+                        required
+                      />
+                      <div className="space-y-1.5">
+                        <p className="text-sm font-semibold text-slate-800">Percentage</p>
+                        <div className="flex min-h-[46px] items-center rounded-xl border border-emerald-200 bg-emerald-50 px-4 text-sm font-semibold text-emerald-700">
+                          {Number(subject.subject_percentage).toFixed(2)}%
+                        </div>
+                      </div>
+                      <Button
+                        variant="danger"
+                        className="mt-auto px-3 py-2 text-sm"
+                        disabled={editForm.subjects.length === 1}
+                        onClick={() => removeEditSubject(subject.id)}
+                      >
+                        <FaTrashAlt /> Remove
+                      </Button>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
 
@@ -945,7 +1109,7 @@ export default function IssuerDashboard() {
                 Cancel
               </Button>
               <Button className="w-full sm:w-auto" onClick={saveCertificateEdits} disabled={isSavingEdit}>
-                {isSavingEdit ? "Saving..." : "Save Changes"}
+                {isSavingEdit ? "Saving..." : "Save Marks"}
               </Button>
             </div>
           </div>

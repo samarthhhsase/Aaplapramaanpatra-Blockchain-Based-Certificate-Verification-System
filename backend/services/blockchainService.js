@@ -196,11 +196,34 @@ async function revokeCertificateOnChain(certificateId) {
   }
 }
 
+async function updateCertificateOnChain({ certificateId, certificateHash, studentName, course }) {
+  try {
+    await ensureBlockchainReady();
+    const contract = getContract();
+
+    if (typeof contract.updateCertificate !== 'function') {
+      throw new Error('Deployed contract does not support certificate updates. Redeploy the upgraded contract.');
+    }
+
+    const tx = await contract.updateCertificate(certificateId, certificateHash, studentName, course);
+    const receipt = await tx.wait();
+
+    return {
+      transactionHash: tx.hash,
+      blockNumber: receipt.blockNumber,
+      status: receipt.status,
+    };
+  } catch (error) {
+    throw normalizeError(error, `Failed to update certificate ${certificateId} on Ganache`);
+  }
+}
+
 module.exports = {
   ensureBlockchainReady,
   issueCertificateOnChain,
   verifyCertificateOnChain,
   revokeCertificateOnChain,
+  updateCertificateOnChain,
   get contractAddress() {
     return String(process.env.CONTRACT_ADDRESS || getContractConfig().contractAddress || '').trim();
   },
