@@ -7,20 +7,24 @@ const { roundToTwo } = require('../utils/marks');
 async function getDashboardStats(req, res) {
   try {
     const studentId = req.user.profileId;
+    const schoolId = Number(req.user?.schoolId || req.user?.school_id || 0);
 
     const [certRows] = await pool.execute(
-      'SELECT COUNT(*) AS totalCertificates FROM certificates WHERE student_id = ?',
-      [studentId]
+      'SELECT COUNT(*) AS totalCertificates FROM certificates WHERE student_id = ? AND school_id = ?',
+      [studentId, schoolId]
     );
 
     const [revokedRows] = await pool.execute(
-      'SELECT COUNT(*) AS totalRevoked FROM certificates WHERE student_id = ? AND status = ?',
-      [studentId, 'Revoked']
+      'SELECT COUNT(*) AS totalRevoked FROM certificates WHERE student_id = ? AND school_id = ? AND status = ?',
+      [studentId, schoolId, 'Revoked']
     );
 
     const [complaintRows] = await pool.execute(
-      'SELECT COUNT(*) AS totalComplaints FROM complaints WHERE student_id = ?',
-      [studentId]
+      `SELECT COUNT(*) AS totalComplaints
+       FROM complaints cp
+       JOIN certificates c ON cp.certificate_id = c.id
+       WHERE cp.student_id = ? AND c.school_id = ?`,
+      [studentId, schoolId]
     );
 
     return res.status(200).json({
@@ -38,6 +42,7 @@ async function getDashboardStats(req, res) {
 async function getMyCertificates(req, res) {
   try {
     const studentId = req.user.profileId;
+    const schoolId = Number(req.user?.schoolId || req.user?.school_id || 0);
 
     const [rows] = await pool.execute(
       `SELECT
@@ -65,9 +70,9 @@ async function getMyCertificates(req, res) {
        FROM certificates c
        JOIN issuers i ON c.issuer_id = i.id
        JOIN users u ON i.user_id = u.id
-       WHERE c.student_id = ?
+       WHERE c.student_id = ? AND c.school_id = ?
        ORDER BY c.created_at DESC`,
-      [studentId]
+      [studentId, schoolId]
     );
 
     const subjectsByCertificateId = await getSubjectsByCertificateIds(rows.map((row) => row.id));
@@ -89,6 +94,7 @@ async function getMyCertificates(req, res) {
 async function raiseComplaint(req, res) {
   try {
     const studentId = req.user.profileId;
+    const schoolId = Number(req.user?.schoolId || req.user?.school_id || 0);
     const { certificateId, message } = req.body;
 
     if (!certificateId || !message) {
@@ -100,8 +106,8 @@ async function raiseComplaint(req, res) {
     }
 
     const [certRows] = await pool.execute(
-      'SELECT id FROM certificates WHERE id = ? AND student_id = ? LIMIT 1',
-      [certificateId, studentId]
+      'SELECT id FROM certificates WHERE id = ? AND student_id = ? AND school_id = ? LIMIT 1',
+      [certificateId, studentId, schoolId]
     );
 
     if (certRows.length === 0) {
@@ -129,6 +135,7 @@ async function raiseComplaint(req, res) {
 async function getComplaints(req, res) {
   try {
     const studentId = req.user.profileId;
+    const schoolId = Number(req.user?.schoolId || req.user?.school_id || 0);
 
     const [rows] = await pool.execute(
       `SELECT
@@ -140,9 +147,9 @@ async function getComplaints(req, res) {
          c.certificate_no
        FROM complaints cp
        JOIN certificates c ON cp.certificate_id = c.id
-       WHERE cp.student_id = ?
+       WHERE cp.student_id = ? AND c.school_id = ?
        ORDER BY cp.created_at DESC`,
-      [studentId]
+      [studentId, schoolId]
     );
 
     return res.status(200).json({ complaints: rows });
@@ -154,6 +161,7 @@ async function getComplaints(req, res) {
 async function downloadMyCertificatePdf(req, res) {
   try {
     const studentId = req.user.profileId;
+    const schoolId = Number(req.user?.schoolId || req.user?.school_id || 0);
     const { certNo } = req.params;
 
     const [rows] = await pool.execute(
@@ -180,9 +188,9 @@ async function downloadMyCertificatePdf(req, res) {
        FROM certificates c
        JOIN students s ON c.student_id = s.id
        JOIN issuers i ON c.issuer_id = i.id
-       WHERE c.certificate_no = ? AND c.student_id = ?
+       WHERE c.certificate_no = ? AND c.student_id = ? AND c.school_id = ?
        LIMIT 1`,
-      [certNo, studentId]
+      [certNo, studentId, schoolId]
     );
 
     if (rows.length === 0) {

@@ -25,6 +25,7 @@ export default function AdminNavbar({ user, title, description, onLogout }) {
           <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
             <p className="text-xs uppercase tracking-[0.2em] text-slate-500">{t("school")}</p>
             <p className="mt-1 text-sm font-semibold text-slate-900">{user?.schoolName || user?.school_name || t("admin")}</p>
+            <p className="mt-1 text-xs text-slate-500">{t("schoolNumber")}: {user?.schoolNo || user?.school_no || "-"}</p>
           </div>
           <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3">
             <span className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-950 text-sm font-bold text-emerald-300">

@@ -1,6 +1,7 @@
 const express = require('express');
 const { authenticate } = require('../middleware/authMiddleware');
 const { authorizeRoles } = require('../middleware/roleMiddleware');
+const { requireSchoolContext } = require('../middleware/schoolContext');
 const {
   getDashboard,
   getIssuers,
@@ -21,7 +22,7 @@ const {
 
 const router = express.Router();
 
-router.use(authenticate, authorizeRoles('admin'));
+router.use(authenticate, authorizeRoles('admin'), requireSchoolContext);
 
 router.get('/dashboard', getDashboard);
 router.get('/issuers', getIssuers);

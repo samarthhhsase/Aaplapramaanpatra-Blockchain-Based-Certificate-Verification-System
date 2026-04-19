@@ -1,5 +1,6 @@
 const express = require('express');
 const { authenticate, authorizeRoles } = require('../middleware/auth');
+const { requireSchoolContext } = require('../middleware/schoolContext');
 const {
   getDashboardStats,
   getMyCertificates,
@@ -10,7 +11,7 @@ const {
 
 const router = express.Router();
 
-router.use(authenticate, authorizeRoles('student'));
+router.use(authenticate, authorizeRoles('student'), requireSchoolContext);
 
 router.get('/dashboard/stats', getDashboardStats);
 router.get('/certificates', getMyCertificates);

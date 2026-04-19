@@ -57,6 +57,13 @@ async function bootstrapDatabase() {
   let serverConnection;
 
   try {
+    console.info('[DB TARGET]', {
+      host: process.env.DB_HOST,
+      port: Number(process.env.DB_PORT || 3306),
+      database: process.env.DB_NAME,
+      user: process.env.DB_USER,
+    });
+
     serverConnection = await mysql.createConnection(getBaseConfig());
     await serverConnection.ping();
 

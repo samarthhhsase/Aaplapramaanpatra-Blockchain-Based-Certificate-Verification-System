@@ -1,6 +1,7 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const pool = require('../db');
+const { generateUniqueUserUsername } = require('../utils/identity');
 const { getSubjectsByCertificateIds } = require('../utils/certificateSubjects');
 const { roundToTwo } = require('../utils/marks');
 const { logAudit } = require('../utils/auditLog');
@@ -36,6 +37,8 @@ function createToken(admin) {
       role: 'admin',
       username: admin.admin_name,
       schoolName: admin.school_name,
+      schoolId: admin.school_id,
+      school_id: admin.school_id,
     },
     process.env.JWT_SECRET,
     { expiresIn: '24h' }
@@ -50,6 +53,8 @@ function buildAdminUser(admin) {
     username: admin.admin_name,
     adminName: admin.admin_name,
     schoolName: admin.school_name,
+    schoolNo: admin.school_no || null,
+    school_id: admin.school_id,
     loginId: admin.login_id,
     dashboardRoute: '/admin-dashboard',
   };
@@ -64,6 +69,10 @@ function validatePassword(password, fieldName = 'password') {
 
 function getAdminIdFromRequest(req) {
   return req.user?.adminId || req.user?.id || null;
+}
+
+function getSchoolIdFromRequest(req) {
+  return Number(req.user?.schoolId || req.user?.school_id || 0);
 }
 
 async function adminLogin(req, res) {
@@ -106,10 +115,14 @@ async function adminLogin(req, res) {
 
 async function getDashboard(req, res) {
   try {
-    const [issuerCountRows] = await pool.execute('SELECT COUNT(*) AS totalIssuers FROM issuers');
-    const [studentCountRows] = await pool.execute('SELECT COUNT(*) AS totalStudents FROM students');
-    const [certificateCountRows] = await pool.execute('SELECT COUNT(*) AS totalCertificates FROM certificates');
-    const [activeIssuerRows] = await pool.execute('SELECT COUNT(*) AS totalActiveIssuers FROM issuers WHERE is_active = 1');
+    const schoolId = getSchoolIdFromRequest(req);
+    const [issuerCountRows] = await pool.execute('SELECT COUNT(*) AS totalIssuers FROM issuers WHERE school_id = ?', [schoolId]);
+    const [studentCountRows] = await pool.execute('SELECT COUNT(*) AS totalStudents FROM students WHERE school_id = ?', [schoolId]);
+    const [certificateCountRows] = await pool.execute('SELECT COUNT(*) AS totalCertificates FROM certificates WHERE school_id = ?', [schoolId]);
+    const [activeIssuerRows] = await pool.execute(
+      'SELECT COUNT(*) AS totalActiveIssuers FROM issuers WHERE school_id = ? AND is_active = 1',
+      [schoolId]
+    );
 
     const [recentIssuers] = await pool.execute(
       `SELECT
@@ -123,9 +136,11 @@ async function getDashboard(req, res) {
        FROM issuers i
        LEFT JOIN admins a ON i.admin_id = a.id
        LEFT JOIN certificates c ON c.issuer_id = i.id
+       WHERE i.school_id = ?
        GROUP BY i.id, i.name, i.email, i.institute_name, a.school_name, i.is_active, i.created_at
        ORDER BY i.created_at DESC
-       LIMIT 5`
+       LIMIT 5`,
+      [schoolId]
     );
 
     const [recentStudents] = await pool.execute(
@@ -134,16 +149,20 @@ async function getDashboard(req, res) {
          s.name AS student_name,
          s.email,
          s.roll_number,
+         s.roll_no,
          s.course,
          s.class_name,
+         s.class_div,
          s.semester,
          s.created_at,
          COUNT(c.id) AS certificates_count
        FROM students s
        LEFT JOIN certificates c ON c.student_id = s.id
-       GROUP BY s.id, s.name, s.email, s.roll_number, s.course, s.class_name, s.semester, s.created_at
+       WHERE s.school_id = ?
+       GROUP BY s.id, s.name, s.email, s.roll_number, s.roll_no, s.course, s.class_name, s.class_div, s.semester, s.created_at
        ORDER BY s.created_at DESC
-       LIMIT 5`
+       LIMIT 5`,
+      [schoolId]
     );
 
     const [recentCertificates] = await pool.execute(
@@ -161,8 +180,10 @@ async function getDashboard(req, res) {
        FROM certificates c
        JOIN students s ON c.student_id = s.id
        JOIN issuers i ON c.issuer_id = i.id
+       WHERE c.school_id = ?
        ORDER BY c.created_at DESC
-       LIMIT 5`
+       LIMIT 5`,
+      [schoolId]
     );
 
     return res.status(200).json({
@@ -188,14 +209,15 @@ async function getDashboard(req, res) {
 
 async function getIssuers(req, res) {
   try {
+    const schoolId = getSchoolIdFromRequest(req);
     const search = normalizeText(req.query?.search);
     const likeSearch = `%${search}%`;
-    const params = [];
-    let whereClause = '';
+    const params = [schoolId];
+    let whereClause = 'WHERE i.school_id = ?';
 
     if (search) {
-      whereClause = `
-        WHERE (
+      whereClause += `
+        AND (
           i.name LIKE ?
           OR i.email LIKE ?
           OR COALESCE(i.institute_name, '') LIKE ?
@@ -233,6 +255,7 @@ async function getIssuers(req, res) {
 
 async function getIssuerDetails(req, res) {
   try {
+    const schoolId = getSchoolIdFromRequest(req);
     const issuerId = normalizeInteger(req.params?.id);
     if (!issuerId) {
       return res.status(400).json({ success: false, message: 'Invalid issuer id' });
@@ -253,9 +276,9 @@ async function getIssuerDetails(req, res) {
        FROM issuers i
        JOIN users u ON i.user_id = u.id
        LEFT JOIN certificates c ON c.issuer_id = i.id
-       WHERE i.id = ?
+       WHERE i.id = ? AND i.school_id = ?
        GROUP BY i.id, i.user_id, i.name, i.email, u.username, i.institute_name, i.is_active, i.admin_id, i.created_at`,
-      [issuerId]
+      [issuerId, schoolId]
     );
 
     if (rows.length === 0) {
@@ -272,10 +295,10 @@ async function getIssuerDetails(req, res) {
          s.name AS student_name
        FROM certificates c
        JOIN students s ON c.student_id = s.id
-       WHERE c.issuer_id = ?
+       WHERE c.issuer_id = ? AND c.school_id = ?
        ORDER BY c.created_at DESC
        LIMIT 10`,
-      [issuerId]
+      [issuerId, schoolId]
     );
 
     return res.status(200).json({ success: true, issuer: { ...rows[0], recentCertificates } });
@@ -287,6 +310,7 @@ async function getIssuerDetails(req, res) {
 async function createIssuer(req, res) {
   let connection;
   try {
+    const schoolId = getSchoolIdFromRequest(req);
     const issuerName = normalizeText(req.body?.issuer_name);
     const email = normalizeEmail(req.body?.email);
     const password = req.body?.password;
@@ -306,21 +330,30 @@ async function createIssuer(req, res) {
     await connection.beginTransaction();
 
     const [existingUser] = await connection.execute('SELECT id FROM users WHERE email = ? LIMIT 1', [email]);
+    const [existingIssuer] = await connection.execute('SELECT id FROM issuers WHERE email = ? LIMIT 1', [email]);
+    console.info('[ADMIN][CREATE_ISSUER] Existing user rows', existingUser);
+    console.info('[ADMIN][CREATE_ISSUER] Existing issuer rows', existingIssuer);
     if (existingUser.length > 0) {
       await connection.rollback();
-      return res.status(409).json({ success: false, message: 'Email is already registered' });
+      return res.status(409).json({ success: false, message: 'Issuer already exists with this email' });
+    }
+    if (existingIssuer.length > 0) {
+      await connection.rollback();
+      return res.status(409).json({ success: false, message: 'Issuer already exists with this email' });
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
+    const generatedUsername = await generateUniqueUserUsername('issuer', connection);
+    console.info('[ADMIN][CREATE_ISSUER] Generated internal username', generatedUsername);
     const [userInsert] = await connection.execute(
       'INSERT INTO users (username, email, password, role) VALUES (?, ?, ?, ?)',
-      [email, email, hashedPassword, 'issuer']
+      [generatedUsername, email, hashedPassword, 'issuer']
     );
 
     const [issuerInsert] = await connection.execute(
-      `INSERT INTO issuers (user_id, admin_id, name, email, password, institute_name, is_active)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [userInsert.insertId, getAdminIdFromRequest(req), issuerName, email, hashedPassword, instituteName, isActive ? 1 : 0]
+      `INSERT INTO issuers (user_id, school_id, admin_id, name, email, password, institute_name, is_active)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [userInsert.insertId, schoolId, getAdminIdFromRequest(req), issuerName, email, hashedPassword, instituteName, isActive ? 1 : 0]
     );
 
     await connection.commit();
@@ -356,6 +389,7 @@ async function createIssuer(req, res) {
 async function updateIssuer(req, res) {
   let connection;
   try {
+    const schoolId = getSchoolIdFromRequest(req);
     const issuerId = normalizeInteger(req.params?.id);
     const issuerName = normalizeText(req.body?.issuer_name);
     const email = normalizeEmail(req.body?.email);
@@ -380,8 +414,8 @@ async function updateIssuer(req, res) {
     await connection.beginTransaction();
 
     const [issuerRows] = await connection.execute(
-      'SELECT id, user_id, name, email, institute_name, is_active FROM issuers WHERE id = ? LIMIT 1',
-      [issuerId]
+      'SELECT id, user_id, school_id, name, email, institute_name, is_active FROM issuers WHERE id = ? AND school_id = ? LIMIT 1',
+      [issuerId, schoolId]
     );
 
     if (issuerRows.length === 0) {
@@ -439,6 +473,7 @@ async function updateIssuer(req, res) {
 async function deleteIssuer(req, res) {
   let connection;
   try {
+    const schoolId = getSchoolIdFromRequest(req);
     const issuerId = normalizeInteger(req.params?.id);
     if (!issuerId) {
       return res.status(400).json({ success: false, message: 'Invalid issuer id' });
@@ -447,7 +482,10 @@ async function deleteIssuer(req, res) {
     connection = await pool.getConnection();
     await connection.beginTransaction();
 
-    const [rows] = await connection.execute('SELECT id, user_id, name, email FROM issuers WHERE id = ? LIMIT 1', [issuerId]);
+    const [rows] = await connection.execute(
+      'SELECT id, user_id, name, email FROM issuers WHERE id = ? AND school_id = ? LIMIT 1',
+      [issuerId, schoolId]
+    );
     if (rows.length === 0) {
       await connection.rollback();
       return res.status(404).json({ success: false, message: 'Issuer not found' });
@@ -476,6 +514,7 @@ async function deleteIssuer(req, res) {
 
 async function updateIssuerStatus(req, res) {
   try {
+    const schoolId = getSchoolIdFromRequest(req);
     const issuerId = normalizeInteger(req.params?.id);
     const isActive = isTruthyBoolean(req.body?.is_active);
 
@@ -483,7 +522,7 @@ async function updateIssuerStatus(req, res) {
       return res.status(400).json({ success: false, message: 'Invalid issuer id' });
     }
 
-    const [rows] = await pool.execute('SELECT id, is_active FROM issuers WHERE id = ? LIMIT 1', [issuerId]);
+    const [rows] = await pool.execute('SELECT id, is_active FROM issuers WHERE id = ? AND school_id = ? LIMIT 1', [issuerId, schoolId]);
     if (rows.length === 0) {
       return res.status(404).json({ success: false, message: 'Issuer not found' });
     }
@@ -504,14 +543,15 @@ async function updateIssuerStatus(req, res) {
 
 async function getStudents(req, res) {
   try {
+    const schoolId = getSchoolIdFromRequest(req);
     const search = normalizeText(req.query?.search);
-    const params = [];
-    let whereClause = '';
+    const params = [schoolId];
+    let whereClause = 'WHERE s.school_id = ?';
 
     if (search) {
       const likeSearch = `%${search}%`;
-      whereClause = `
-        WHERE (
+      whereClause += `
+        AND (
           s.name LIKE ?
           OR s.email LIKE ?
           OR COALESCE(s.roll_number, '') LIKE ?
@@ -530,8 +570,10 @@ async function getStudents(req, res) {
          s.name AS student_name,
          s.email,
          s.roll_number,
+         s.roll_no,
          s.course,
          s.class_name,
+         s.class_div,
          s.semester,
          s.created_at,
          COUNT(DISTINCT c.id) AS certificates_count
@@ -551,6 +593,7 @@ async function getStudents(req, res) {
 
 async function getStudentDetails(req, res) {
   try {
+    const schoolId = getSchoolIdFromRequest(req);
     const studentId = normalizeInteger(req.params?.id);
     if (!studentId) {
       return res.status(400).json({ success: false, message: 'Invalid student id' });
@@ -568,9 +611,9 @@ async function getStudentDetails(req, res) {
          s.semester,
          s.created_at
        FROM students s
-       WHERE s.id = ?
+       WHERE s.id = ? AND s.school_id = ?
        LIMIT 1`,
-      [studentId]
+      [studentId, schoolId]
     );
 
     if (rows.length === 0) {
@@ -590,9 +633,9 @@ async function getStudentDetails(req, res) {
          i.name AS issuer_name
        FROM certificates c
        JOIN issuers i ON c.issuer_id = i.id
-       WHERE c.student_id = ?
+       WHERE c.student_id = ? AND c.school_id = ?
        ORDER BY c.created_at DESC`,
-      [studentId]
+      [studentId, schoolId]
     );
 
     return res.status(200).json({ success: true, student: { ...rows[0], certificates } });
@@ -604,12 +647,14 @@ async function getStudentDetails(req, res) {
 async function createStudent(req, res) {
   let connection;
   try {
+    const schoolId = getSchoolIdFromRequest(req);
     const studentName = normalizeText(req.body?.student_name);
     const email = normalizeEmail(req.body?.email);
     const password = req.body?.password;
     const rollNumber = normalizeNullable(req.body?.roll_number);
     const course = normalizeNullable(req.body?.course);
     const className = normalizeNullable(req.body?.class_name || req.body?.class);
+    const classDiv = normalizeNullable(req.body?.class_div);
     const semester = normalizeNullable(req.body?.semester);
 
     if (!studentName || !email || !password || !rollNumber) {
@@ -625,34 +670,46 @@ async function createStudent(req, res) {
     await connection.beginTransaction();
 
     const [existingUser] = await connection.execute('SELECT id FROM users WHERE email = ? LIMIT 1', [email]);
+    const [existingStudent] = await connection.execute('SELECT id FROM students WHERE email = ? LIMIT 1', [email]);
+    console.info('[ADMIN][CREATE_STUDENT] Existing user rows', existingUser);
+    console.info('[ADMIN][CREATE_STUDENT] Existing student rows', existingStudent);
     if (existingUser.length > 0) {
       await connection.rollback();
-      return res.status(409).json({ success: false, message: 'Email is already registered' });
+      return res.status(409).json({ success: false, message: 'Student already exists with this email' });
+    }
+    if (existingStudent.length > 0) {
+      await connection.rollback();
+      return res.status(409).json({ success: false, message: 'Student already exists with this email' });
     }
 
-    const [rollConflict] = await connection.execute('SELECT id FROM students WHERE roll_number = ? LIMIT 1', [rollNumber]);
+    const [rollConflict] = await connection.execute(
+      'SELECT id FROM students WHERE school_id = ? AND roll_number = ? LIMIT 1',
+      [schoolId, rollNumber]
+    );
     if (rollConflict.length > 0) {
       await connection.rollback();
       return res.status(409).json({ success: false, message: 'Roll number is already registered' });
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
+    const generatedUsername = await generateUniqueUserUsername('student', connection);
+    console.info('[ADMIN][CREATE_STUDENT] Generated internal username', generatedUsername);
     const [userInsert] = await connection.execute(
       'INSERT INTO users (username, email, password, role) VALUES (?, ?, ?, ?)',
-      [email, email, hashedPassword, 'student']
+      [generatedUsername, email, hashedPassword, 'student']
     );
 
     const [studentInsert] = await connection.execute(
-      `INSERT INTO students (user_id, name, email, password, roll_number, course, class_name, semester)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [userInsert.insertId, studentName, email, hashedPassword, rollNumber, course, className, semester]
+      `INSERT INTO students (user_id, school_id, name, email, password, roll_number, roll_no, course, class_name, class_div, semester)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [userInsert.insertId, schoolId, studentName, email, hashedPassword, rollNumber, rollNumber, course, className, classDiv, semester]
     );
 
     await connection.commit();
 
     await logAudit({
       action: 'ADMIN_CREATE_STUDENT',
-      newData: { studentId: studentInsert.insertId, studentName, email, rollNumber, course, className, semester },
+      newData: { studentId: studentInsert.insertId, studentName, email, rollNumber, course, className, classDiv, semester, schoolId },
     });
 
     return res.status(201).json({
@@ -663,8 +720,10 @@ async function createStudent(req, res) {
         student_name: studentName,
         email,
         roll_number: rollNumber,
+        roll_no: rollNumber,
         course,
         class_name: className,
+        class_div: classDiv,
         semester,
       },
     });
@@ -683,6 +742,7 @@ async function createStudent(req, res) {
 async function updateStudent(req, res) {
   let connection;
   try {
+    const schoolId = getSchoolIdFromRequest(req);
     const studentId = normalizeInteger(req.params?.id);
     const studentName = normalizeText(req.body?.student_name);
     const email = normalizeEmail(req.body?.email);
@@ -690,6 +750,7 @@ async function updateStudent(req, res) {
     const rollNumber = normalizeNullable(req.body?.roll_number);
     const course = normalizeNullable(req.body?.course);
     const className = normalizeNullable(req.body?.class_name || req.body?.class);
+    const classDiv = normalizeNullable(req.body?.class_div);
     const semester = normalizeNullable(req.body?.semester);
 
     if (!studentId) {
@@ -710,11 +771,11 @@ async function updateStudent(req, res) {
     await connection.beginTransaction();
 
     const [studentRows] = await connection.execute(
-      `SELECT id, user_id, name, email, roll_number, course, class_name, semester
+      `SELECT id, user_id, school_id, name, email, roll_number, course, class_name, class_div, semester
        FROM students
-       WHERE id = ?
+       WHERE id = ? AND school_id = ?
        LIMIT 1`,
-      [studentId]
+      [studentId, schoolId]
     );
 
     if (studentRows.length === 0) {
@@ -733,8 +794,8 @@ async function updateStudent(req, res) {
     }
 
     const [rollConflict] = await connection.execute(
-      'SELECT id FROM students WHERE roll_number = ? AND id <> ? LIMIT 1',
-      [rollNumber, studentId]
+      'SELECT id FROM students WHERE school_id = ? AND roll_number = ? AND id <> ? LIMIT 1',
+      [schoolId, rollNumber, studentId]
     );
     if (rollConflict.length > 0) {
       await connection.rollback();
@@ -752,6 +813,7 @@ async function updateStudent(req, res) {
          WHERE id = ?`,
         [studentName, email, hashedPassword, rollNumber, course, className, semester, studentId]
       );
+      await connection.execute('UPDATE students SET roll_no = ?, class_div = ? WHERE id = ?', [rollNumber, classDiv, studentId]);
     } else {
       await connection.execute(
         `UPDATE students
@@ -759,6 +821,7 @@ async function updateStudent(req, res) {
          WHERE id = ?`,
         [studentName, email, rollNumber, course, className, semester, studentId]
       );
+      await connection.execute('UPDATE students SET roll_no = ?, class_div = ? WHERE id = ?', [rollNumber, classDiv, studentId]);
     }
 
     await connection.commit();
@@ -766,7 +829,7 @@ async function updateStudent(req, res) {
     await logAudit({
       action: 'ADMIN_UPDATE_STUDENT',
       oldData: student,
-      newData: { studentId, studentName, email, rollNumber, course, className, semester, passwordUpdated: Boolean(password) },
+      newData: { studentId, studentName, email, rollNumber, course, className, classDiv, semester, passwordUpdated: Boolean(password) },
     });
 
     return res.status(200).json({ success: true, message: 'Student updated successfully' });
@@ -785,6 +848,7 @@ async function updateStudent(req, res) {
 async function deleteStudent(req, res) {
   let connection;
   try {
+    const schoolId = getSchoolIdFromRequest(req);
     const studentId = normalizeInteger(req.params?.id);
     if (!studentId) {
       return res.status(400).json({ success: false, message: 'Invalid student id' });
@@ -794,8 +858,8 @@ async function deleteStudent(req, res) {
     await connection.beginTransaction();
 
     const [rows] = await connection.execute(
-      'SELECT id, user_id, name, email, roll_number FROM students WHERE id = ? LIMIT 1',
-      [studentId]
+      'SELECT id, user_id, name, email, roll_number FROM students WHERE id = ? AND school_id = ? LIMIT 1',
+      [studentId, schoolId]
     );
     if (rows.length === 0) {
       await connection.rollback();
@@ -825,10 +889,14 @@ async function deleteStudent(req, res) {
 
 async function getCertificates(req, res) {
   try {
+    const schoolId = getSchoolIdFromRequest(req);
     const search = normalizeText(req.query?.search);
     const status = normalizeText(req.query?.status);
     const conditions = [];
     const params = [];
+
+    conditions.push('c.school_id = ?');
+    params.push(schoolId);
 
     if (search) {
       const likeSearch = `%${search}%`;
@@ -881,6 +949,7 @@ async function getCertificates(req, res) {
 
 async function getCertificateDetails(req, res) {
   try {
+    const schoolId = getSchoolIdFromRequest(req);
     const certificateId = normalizeInteger(req.params?.id);
     if (!certificateId) {
       return res.status(400).json({ success: false, message: 'Invalid certificate id' });
@@ -912,6 +981,7 @@ async function getCertificateDetails(req, res) {
          s.roll_number,
          s.course AS student_course,
          s.class_name,
+         s.class_div,
          s.semester AS student_semester,
          i.id AS issuer_id,
          i.name AS issuer_name,
@@ -920,9 +990,9 @@ async function getCertificateDetails(req, res) {
        FROM certificates c
        JOIN students s ON c.student_id = s.id
        JOIN issuers i ON c.issuer_id = i.id
-       WHERE c.id = ?
+       WHERE c.id = ? AND c.school_id = ?
        LIMIT 1`,
-      [certificateId]
+      [certificateId, schoolId]
     );
 
     if (rows.length === 0) {
@@ -944,12 +1014,16 @@ async function getCertificateDetails(req, res) {
 
 async function revokeCertificate(req, res) {
   try {
+    const schoolId = getSchoolIdFromRequest(req);
     const certificateId = normalizeInteger(req.params?.id);
     if (!certificateId) {
       return res.status(400).json({ success: false, message: 'Invalid certificate id' });
     }
 
-    const [rows] = await pool.execute('SELECT id, status FROM certificates WHERE id = ? LIMIT 1', [certificateId]);
+    const [rows] = await pool.execute(
+      'SELECT id, status FROM certificates WHERE id = ? AND school_id = ? LIMIT 1',
+      [certificateId, schoolId]
+    );
     if (rows.length === 0) {
       return res.status(404).json({ success: false, message: 'Certificate not found' });
     }

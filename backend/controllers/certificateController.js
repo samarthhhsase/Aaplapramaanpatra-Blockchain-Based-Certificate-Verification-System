@@ -63,6 +63,7 @@ async function issueCertificate(req, res) {
         message: 'Issuer profile is missing from the auth token',
       });
     }
+    const schoolId = Number(req.user?.schoolId || req.user?.school_id || 0);
 
     const normalizedIssueDate = normalizeDate(issueDate);
     if (!normalizedIssueDate) {
@@ -70,8 +71,8 @@ async function issueCertificate(req, res) {
     }
 
     const [studentRows] = await pool.execute(
-      'SELECT id, name FROM students WHERE id = ? LIMIT 1',
-      [Number(studentId)]
+      'SELECT id, name FROM students WHERE id = ? AND school_id = ? LIMIT 1',
+      [Number(studentId), schoolId]
     );
     if (studentRows.length === 0) {
       return res.status(404).json({ success: false, message: 'Student not found' });
@@ -100,6 +101,7 @@ async function issueCertificate(req, res) {
         certificate_no,
         student_id,
         issuer_id,
+        school_id,
         student_name,
         course,
         grade,
@@ -111,11 +113,12 @@ async function issueCertificate(req, res) {
         blockchain_tx_hash,
         status,
         is_revoked
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, FALSE)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, FALSE)`,
       [
         certificateNo,
         Number(studentId),
         Number(req.user.profileId),
+        schoolId,
         studentRows[0].name,
         String(course).trim(),
         String(grade).trim(),

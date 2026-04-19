@@ -12,6 +12,7 @@ const adminAuthRoutes = require('./routes/adminAuthRoutes');
 const issuerRoutes = require('./routes/issuerRoutes');
 const studentRoutes = require('./routes/studentRoutes');
 const publicRoutes = require('./routes/publicRoutes');
+const schoolRoutes = require('./routes/schoolRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const certificateRoutes = require('./routes/certificateRoutes');
 const { ensureApplicationSchema } = require('./utils/schemaSync');
@@ -49,6 +50,7 @@ app.use('/api/admin', adminAuthRoutes);
 app.use('/api/issuer', issuerRoutes);
 app.use('/api/student', studentRoutes);
 app.use('/api/public', publicRoutes);
+app.use('/api/schools', schoolRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/certificates', certificateRoutes);
 

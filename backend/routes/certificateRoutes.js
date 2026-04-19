@@ -1,5 +1,6 @@
 const express = require('express');
 const { authenticate, authorizeRoles } = require('../middleware/auth');
+const { requireSchoolContext } = require('../middleware/schoolContext');
 const {
   issueCertificate,
   revokeCertificate,
@@ -19,7 +20,7 @@ router.get('/', (req, res) => {
   });
 });
 
-router.use(authenticate, authorizeRoles('issuer'));
+router.use(authenticate, authorizeRoles('issuer'), requireSchoolContext);
 
 router.put('/:id', updateCertificateMarks);
 router.put('/:id/marks', updateCertificateMarks);

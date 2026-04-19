@@ -34,6 +34,12 @@ function authenticate(req, res, next) {
     if (decoded?.role === 'admin' && !decoded.adminId && decoded.id) {
       decoded.adminId = decoded.id;
     }
+    if (decoded?.schoolId && !decoded.school_id) {
+      decoded.school_id = decoded.schoolId;
+    }
+    if (decoded?.school_id && !decoded.schoolId) {
+      decoded.schoolId = decoded.school_id;
+    }
     req.user = decoded;
     return next();
   } catch (error) {

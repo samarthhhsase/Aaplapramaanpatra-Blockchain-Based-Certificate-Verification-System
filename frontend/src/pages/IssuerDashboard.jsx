@@ -20,10 +20,14 @@ import { apiRequest } from "../utils/api";
 
 const ISSUE_DEFAULTS = {
   studentId: "",
+  studentName: "",
+  studentEmail: "",
   course: "",
   grade: "",
   issueDate: "",
   rollNo: "",
+  studentClassName: "",
+  studentClassDiv: "",
   year: "",
   certificateType: "Final Marksheet",
   remarks: "",
@@ -152,6 +156,8 @@ export default function IssuerDashboard() {
 
   const [stats, setStats] = useState({ totalIssued: 0, totalRevoked: 0, totalComplaints: 0 });
   const [students, setStudents] = useState([]);
+  const [studentDetailsLoading, setStudentDetailsLoading] = useState(false);
+  const [studentDetailsError, setStudentDetailsError] = useState("");
   const [certificates, setCertificates] = useState([]);
   const [complaints, setComplaints] = useState([]);
   const [logs, setLogs] = useState([]);
@@ -232,6 +238,66 @@ export default function IssuerDashboard() {
   useEffect(() => {
     fetchAll();
   }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadStudentDetails() {
+      const selectedId = String(issueForm.studentId || "").trim();
+      if (!selectedId) {
+        if (isMounted) {
+          setStudentDetailsError("");
+          setStudentDetailsLoading(false);
+          setIssueForm((prev) => ({
+            ...prev,
+            studentName: "",
+            studentEmail: "",
+            rollNo: "",
+            studentClassName: "",
+            studentClassDiv: "",
+          }));
+        }
+        return;
+      }
+
+      try {
+        if (isMounted) {
+          setStudentDetailsLoading(true);
+          setStudentDetailsError("");
+        }
+
+        const response = await apiRequest(`/issuer/students/${selectedId}`);
+        const student = response?.student;
+        if (!student) {
+          throw new Error("Student details not found");
+        }
+
+        if (isMounted) {
+          setIssueForm((prev) => ({
+            ...prev,
+            studentName: student.name || "",
+            studentEmail: student.email || "",
+            rollNo: student.roll_no || "",
+            studentClassName: student.class_name || "",
+            studentClassDiv: student.class_div || "",
+          }));
+        }
+      } catch (err) {
+        if (isMounted) {
+          setStudentDetailsError(err.message || "Failed to load student details");
+        }
+      } finally {
+        if (isMounted) {
+          setStudentDetailsLoading(false);
+        }
+      }
+    }
+
+    loadStudentDetails();
+    return () => {
+      isMounted = false;
+    };
+  }, [issueForm.studentId]);
 
   useEffect(() => {
     if (!isEditModalOpen) {
@@ -324,11 +390,14 @@ export default function IssuerDashboard() {
       setIssuing(true);
       const payload = {
         studentId: issueForm.studentId,
-        student_name: selectedStudent?.name || "",
+        student_name: issueForm.studentName.trim(),
+        student_email: issueForm.studentEmail.trim(),
         course: issueForm.course.trim(),
         grade: issueForm.grade.trim(),
         issueDate: issueForm.issueDate,
         roll_no: issueForm.rollNo.trim(),
+        student_class_name: issueForm.studentClassName.trim(),
+        student_class_div: issueForm.studentClassDiv.trim(),
         year: issueForm.year.trim(),
         semester: issueForm.semester,
         class: issueForm.class,
@@ -356,7 +425,7 @@ export default function IssuerDashboard() {
         error: err?.message || err,
         payload: {
           ...issueForm,
-          student_name: selectedStudent?.name || "",
+          student_name: issueForm.studentName.trim(),
           remarks: issueForm.remarks.trim(),
           overall_percentage: overallPercentage,
           subjects: calculatedSubjects,
@@ -681,14 +750,47 @@ export default function IssuerDashboard() {
             <Input label={t("student")} as="select" value={issueForm.studentId} onChange={(event) => updateIssue("studentId", event.target.value)} required>
               <option value="">{t("selectStudent")}</option>
               {students.map((student) => (
-                <option key={student.id} value={student.id}>{student.name} | {student.email}</option>
+                <option key={student.id} value={student.id}>
+                  {student.name} {student.roll_no ? `| ${student.roll_no}` : ""} {student.email ? `| ${student.email}` : ""}
+                </option>
               ))}
             </Input>
 
+            <Input
+              label={t("fullName")}
+              value={issueForm.studentName}
+              onChange={(event) => updateIssue("studentName", event.target.value)}
+              placeholder={t("selectStudentToAutofill")}
+              required
+            />
+            <Input
+              label={t("studentEmail")}
+              type="email"
+              value={issueForm.studentEmail}
+              onChange={(event) => updateIssue("studentEmail", event.target.value)}
+              placeholder="student@example.com"
+            />
+            <Input
+              label={t("rollNo")}
+              value={issueForm.rollNo}
+              onChange={(event) => updateIssue("rollNo", event.target.value)}
+              required
+            />
+            <Input
+              label={t("className")}
+              value={issueForm.studentClassName}
+              onChange={(event) => updateIssue("studentClassName", event.target.value)}
+              placeholder={t("enterClassName")}
+            />
+            <Input
+              label={t("classDivision")}
+              value={issueForm.studentClassDiv}
+              onChange={(event) => updateIssue("studentClassDiv", event.target.value.toUpperCase())}
+              placeholder={t("enterClassDivision")}
+            />
             <Input label={t("course")} value={issueForm.course} onChange={(event) => updateIssue("course", event.target.value)} required />
             <Input label="Grade" value={issueForm.grade} onChange={(event) => updateIssue("grade", event.target.value)} required />
             <Input label={t("issueDate")} type="date" value={issueForm.issueDate} onChange={(event) => updateIssue("issueDate", event.target.value)} required />
-            <Input label={t("rollNo")} value={issueForm.rollNo} onChange={(event) => updateIssue("rollNo", event.target.value)} required />
             <Input label={t("year")} value={issueForm.year} onChange={(event) => updateIssue("year", event.target.value)} placeholder="2025-2026" required />
             <Input
               label={t("certificateType")}
@@ -715,6 +817,16 @@ export default function IssuerDashboard() {
                 <option key={semester} value={semester}>{semester}</option>
               ))}
             </Input>
+            <div className="xl:col-span-3">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                {studentDetailsLoading ? t("loadingStudentDetails") : issueForm.studentId ? t("studentDataAutoFilled") : t("selectStudentToAutofill")}
+              </div>
+              {studentDetailsError ? (
+                <div className="mt-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                  {studentDetailsError}
+                </div>
+              ) : null}
+            </div>
             <div className="xl:col-span-3">
               <Input
                 label={t("remarks")}
@@ -799,11 +911,14 @@ export default function IssuerDashboard() {
               <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-3">
                 <div className="rounded-[20px] border border-slate-200 bg-white px-4 py-4">
                   <p className="text-xs uppercase tracking-wide text-slate-500">{t("student")}</p>
-                  <p className="mt-1 text-sm font-semibold text-slate-900">{selectedStudent?.name || t("selectAStudent")}</p>
+                  <p className="mt-1 text-sm font-semibold text-slate-900">{issueForm.studentName || selectedStudent?.name || t("selectAStudent")}</p>
+                  <p className="mt-1 text-xs text-slate-500">{issueForm.studentEmail || "-"}</p>
                 </div>
                 <div className="rounded-[20px] border border-slate-200 bg-white px-4 py-4">
-                  <p className="text-xs uppercase tracking-wide text-slate-500">{t("subjectsAdded")}</p>
-                  <p className="mt-1 text-sm font-semibold text-slate-900">{calculatedSubjects.length}</p>
+                  <p className="text-xs uppercase tracking-wide text-slate-500">{t("className")}</p>
+                  <p className="mt-1 text-sm font-semibold text-slate-900">
+                    {(issueForm.studentClassName || "-") + (issueForm.studentClassDiv ? ` / ${issueForm.studentClassDiv}` : "")}
+                  </p>
                 </div>
                 <div className="rounded-[20px] border border-cyan-200 bg-cyan-50 px-4 py-4">
                   <p className="text-xs uppercase tracking-wide text-cyan-700">{t("overallPercentage")}</p>

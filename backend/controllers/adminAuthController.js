@@ -2,6 +2,11 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const pool = require('../db');
 const { ensureAdminSchema } = require('../utils/adminSchema');
+const { generateUniqueUserUsername } = require('../utils/identity');
+const {
+  validateSchoolInput,
+  ensureSchoolForAdminRegistration,
+} = require('../utils/schools');
 
 function normalizeText(value) {
   return String(value || '').trim();
@@ -14,7 +19,10 @@ function normalizeEmail(value) {
 function buildAdminPayload(admin) {
   return {
     id: admin.id,
+    adminId: admin.id,
     role: 'admin',
+    schoolId: admin.school_id,
+    school_id: admin.school_id,
   };
 }
 
@@ -22,6 +30,8 @@ function buildAdminResponse(admin) {
   return {
     id: admin.id,
     school_name: admin.school_name,
+    school_no: admin.school_no,
+    school_id: admin.school_id,
     admin_name: admin.admin_name,
     name: admin.admin_name,
     login_id: admin.login_id,
@@ -69,21 +79,28 @@ async function comparePasswordAndRepairIfNeeded(connection, adminRecord, plainPa
 
 function validateRegistration(body) {
   const schoolName = normalizeText(body?.school_name);
+  const schoolNo = normalizeText(body?.school_no);
   const adminName = normalizeText(body?.admin_name);
   const loginId = normalizeText(body?.login_id);
   const email = normalizeEmail(body?.email);
   const password = body?.password;
 
-  if (!schoolName || !adminName || !loginId || !email || !password) {
-    return { error: 'school_name, admin_name, login_id, email, and password are required' };
+  if (!schoolName || !schoolNo || !adminName || !loginId || !email || !password) {
+    return { error: 'school_name, school_no, admin_name, login_id, email, and password are required' };
   }
 
   if (password.length < 6) {
     return { error: 'Password must be at least 6 characters long' };
   }
 
+  const schoolValidation = validateSchoolInput({ schoolName, schoolNo });
+  if (schoolValidation.error) {
+    return { error: schoolValidation.error };
+  }
+
   return {
-    schoolName,
+    schoolName: schoolValidation.schoolName,
+    schoolNo: schoolValidation.schoolNo,
     adminName,
     loginId,
     email,
@@ -96,6 +113,7 @@ async function registerAdmin(req, res) {
   try {
     const debugPayload = {
       school_name: normalizeText(req.body?.school_name),
+      school_no: normalizeText(req.body?.school_no),
       admin_name: normalizeText(req.body?.admin_name),
       login_id: normalizeText(req.body?.login_id),
       email: normalizeEmail(req.body?.email),
@@ -108,6 +126,7 @@ async function registerAdmin(req, res) {
     console.info('[ADMIN_AUTH][REGISTER] Validation result', {
       valid: !validated.error,
       schoolName: validated.schoolName,
+      schoolNo: validated.schoolNo,
       adminName: validated.adminName,
       loginId: validated.loginId,
       email: validated.email,
@@ -119,39 +138,56 @@ async function registerAdmin(req, res) {
     connection = await pool.getConnection();
     await connection.beginTransaction();
 
-    const [existingUsers] = await connection.execute(
-      `SELECT id, username, email, role
+    const school = await ensureSchoolForAdminRegistration(connection, validated.schoolName, validated.schoolNo);
+
+    const [existingUserEmails] = await connection.execute(
+      `SELECT id, email, role
        FROM users
-       WHERE email = ? OR username = ?
+       WHERE email = ?
        LIMIT 5`,
-      [validated.email, validated.loginId]
+      [validated.email]
     );
-    const [existingRows] = await connection.execute(
-      `SELECT id, login_id, email
+    const [existingLoginIds] = await connection.execute(
+      `SELECT id, login_id
        FROM admins
-       WHERE login_id = ? OR email = ?`,
-      [validated.loginId, validated.email]
+       WHERE login_id = ?
+       LIMIT 5`,
+      [validated.loginId]
+    );
+    const [existingAdminEmails] = await connection.execute(
+      `SELECT id, email
+       FROM admins
+       WHERE email = ?
+       LIMIT 5`,
+      [validated.email]
     );
 
-    if (existingUsers.length > 0 || existingRows.length > 0) {
-      const duplicate = existingRows.some((row) => row.login_id === validated.loginId)
-        || existingUsers.some((row) => row.username === validated.loginId)
-        ? 'Admin login ID already exists'
-        : 'Admin email already exists';
+    console.info('[ADMIN_AUTH][REGISTER] Existing admin login rows', existingLoginIds);
+    console.info('[ADMIN_AUTH][REGISTER] Existing admin email rows', existingAdminEmails);
+    console.info('[ADMIN_AUTH][REGISTER] Existing user email rows', existingUserEmails);
+
+    if (existingLoginIds.length > 0) {
       await connection.rollback();
-      return res.status(409).json({ success: false, message: duplicate });
+      return res.status(409).json({ success: false, message: 'Admin login ID already exists' });
+    }
+
+    if (existingAdminEmails.length > 0 || existingUserEmails.length > 0) {
+      await connection.rollback();
+      return res.status(409).json({ success: false, message: 'Admin already exists with this email' });
     }
 
     const hashedPassword = await bcrypt.hash(validated.password, 10);
+    const generatedUsername = await generateUniqueUserUsername('admin', connection);
+    console.info('[ADMIN_AUTH][REGISTER] Generated internal admin username', generatedUsername);
     await connection.execute(
       `INSERT INTO users (username, email, password, role)
        VALUES (?, ?, ?, 'admin')`,
-      [validated.loginId, validated.email, hashedPassword]
+      [generatedUsername, validated.email, hashedPassword]
     );
     const [insertResult] = await connection.execute(
-      `INSERT INTO admins (school_name, admin_name, login_id, email, password)
-       VALUES (?, ?, ?, ?, ?)`,
-      [validated.schoolName, validated.adminName, validated.loginId, validated.email, hashedPassword]
+      `INSERT INTO admins (school_id, school_name, admin_name, login_id, email, password)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [school.id, school.school_name, validated.adminName, validated.loginId, validated.email, hashedPassword]
     );
 
     await connection.commit();
@@ -159,6 +195,7 @@ async function registerAdmin(req, res) {
       adminId: insertResult.insertId,
       loginId: validated.loginId,
       email: validated.email,
+      generatedUsername,
     });
 
     return res.status(201).json({
@@ -166,7 +203,9 @@ async function registerAdmin(req, res) {
       message: 'Admin registered successfully',
       admin: {
         id: insertResult.insertId,
-        school_name: validated.schoolName,
+        school_id: school.id,
+        school_name: school.school_name,
+        school_no: school.school_no,
         admin_name: validated.adminName,
         login_id: validated.loginId,
         email: validated.email,
@@ -215,6 +254,8 @@ async function loginAdmin(req, res) {
       `SELECT
          a.id,
          a.school_name,
+         a.school_id,
+         s.school_no,
          a.admin_name,
          a.login_id,
          a.email,
@@ -226,6 +267,7 @@ async function loginAdmin(req, res) {
          u.password AS user_password,
          u.role AS user_role
        FROM admins a
+       JOIN schools s ON a.school_id = s.id
        LEFT JOIN users u
          ON u.email = a.email OR u.username = a.login_id
        WHERE a.login_id = ? OR a.email = ? OR u.username = ? OR u.email = ?
@@ -300,9 +342,10 @@ async function getAdminProfile(req, res) {
   try {
     await ensureAdminSchema();
     const [rows] = await pool.execute(
-      `SELECT id, school_name, admin_name, login_id, email, created_at
-       FROM admins
-       WHERE id = ?
+      `SELECT a.id, a.school_name, a.school_id, s.school_no, a.admin_name, a.login_id, a.email, a.created_at
+       FROM admins a
+       JOIN schools s ON a.school_id = s.id
+       WHERE a.id = ?
        LIMIT 1`,
       [req.admin.id]
     );

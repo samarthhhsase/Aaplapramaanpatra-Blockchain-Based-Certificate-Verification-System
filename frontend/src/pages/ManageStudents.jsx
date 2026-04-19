@@ -13,6 +13,7 @@ const emptyForm = {
   roll_number: "",
   course: "",
   class_name: "",
+  class_div: "",
   semester: "",
 };
 
@@ -84,6 +85,7 @@ export default function ManageStudents() {
       roll_number: student.roll_number || "",
       course: student.course || "",
       class_name: student.class_name || "",
+      class_div: student.class_div || "",
       semester: student.semester || "",
     });
     scrollDashboardToSection("student-form-section");
@@ -113,7 +115,7 @@ export default function ManageStudents() {
   };
 
   return (
-    <AdminShell title="Manage Students" description="Create and maintain student records, search by roll number or certificate ID, and inspect every certificate linked to a student profile.">
+    <AdminShell title="Manage Students" description="Create and maintain student records for your school, search by roll number or certificate ID, and inspect every certificate linked to a student profile.">
       {error ? <div className="rounded-3xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-700">{error}</div> : null}
       {success ? <div className="rounded-3xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-700">{success}</div> : null}
 
@@ -122,7 +124,7 @@ export default function ManageStudents() {
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div>
               <h2 className="font-serif text-2xl font-bold text-slate-950">Student Directory</h2>
-              <p className="mt-1 text-sm text-slate-600">Search by name, roll number, course, or certificate number.</p>
+              <p className="mt-1 text-sm text-slate-600">Search by name, roll number, course, or certificate number inside your school.</p>
             </div>
             <div className="flex flex-col gap-3 sm:flex-row">
               <input className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-emerald-500 md:w-72" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search students" />
@@ -136,7 +138,7 @@ export default function ManageStudents() {
                 <tr>
                   <th className="px-4 py-3">Student</th>
                   <th className="px-4 py-3">Roll Number</th>
-                  <th className="px-4 py-3">Course</th>
+                  <th className="px-4 py-3">Class</th>
                   <th className="px-4 py-3">Certificates</th>
                   <th className="px-4 py-3">Actions</th>
                 </tr>
@@ -150,10 +152,10 @@ export default function ManageStudents() {
                       <p className="font-semibold text-slate-900">{student.student_name}</p>
                       <p className="text-xs text-slate-500">{student.email}</p>
                     </td>
-                    <td className="px-4 py-4">{student.roll_number || "-"}</td>
+                    <td className="px-4 py-4">{student.roll_number || student.roll_no || "-"}</td>
                     <td className="px-4 py-4">
-                      <p>{student.course || "-"}</p>
-                      <p className="text-xs text-slate-500">{student.class_name || "-"} • {student.semester || "-"}</p>
+                      <p>{student.class_name || "-"}</p>
+                      <p className="text-xs text-slate-500">{student.class_div || "-"} • {student.semester || "-"}</p>
                     </td>
                     <td className="px-4 py-4">{student.certificates_count}</td>
                     <td className="px-4 py-4">
@@ -180,6 +182,7 @@ export default function ManageStudents() {
               <Input label="Roll Number" value={form.roll_number} onChange={(event) => setForm((prev) => ({ ...prev, roll_number: event.target.value }))} required />
               <Input label="Course" value={form.course} onChange={(event) => setForm((prev) => ({ ...prev, course: event.target.value }))} />
               <Input label="Class" value={form.class_name} onChange={(event) => setForm((prev) => ({ ...prev, class_name: event.target.value }))} />
+              <Input label="Division" value={form.class_div} onChange={(event) => setForm((prev) => ({ ...prev, class_div: event.target.value.toUpperCase() }))} />
               <Input label="Semester" value={form.semester} onChange={(event) => setForm((prev) => ({ ...prev, semester: event.target.value }))} />
               <div className="flex flex-wrap gap-3 pt-1">
                 <Button type="submit" disabled={saving}>{saving ? "Saving..." : editingId ? "Update Student" : "Create Student"}</Button>
@@ -195,8 +198,8 @@ export default function ManageStudents() {
                 <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
                   <p className="text-lg font-semibold text-slate-900">{selectedStudent.student_name}</p>
                   <p className="text-sm text-slate-600">{selectedStudent.email}</p>
-                  <p className="mt-2 text-sm text-slate-600">Roll: {selectedStudent.roll_number || "-"}</p>
-                  <p className="text-sm text-slate-600">{selectedStudent.course || "Course not set"} • {selectedStudent.class_name || "-"} • {selectedStudent.semester || "-"}</p>
+                  <p className="mt-2 text-sm text-slate-600">Roll: {selectedStudent.roll_number || selectedStudent.roll_no || "-"}</p>
+                  <p className="text-sm text-slate-600">{selectedStudent.course || "Course not set"} • {selectedStudent.class_name || "-"} • {selectedStudent.class_div || "-"} • {selectedStudent.semester || "-"}</p>
                 </div>
                 <div>
                   <p className="text-sm font-semibold text-slate-900">Linked certificates</p>

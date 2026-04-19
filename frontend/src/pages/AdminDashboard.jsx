@@ -52,6 +52,7 @@ export default function AdminDashboard() {
               <div className="rounded-3xl border border-white/10 bg-white/10 p-5">
                 <p className="text-xs uppercase tracking-[0.24em] text-emerald-100">{t("schoolName")}</p>
                 <p className="mt-2 text-xl font-semibold">{admin?.school_name || "-"}</p>
+                <p className="mt-1 text-sm text-emerald-100">{t("schoolNumber")}: {admin?.school_no || "-"}</p>
               </div>
               <div className="rounded-3xl border border-white/10 bg-white/10 p-5">
                 <p className="text-xs uppercase tracking-[0.24em] text-emerald-100">{t("adminName")}</p>
@@ -85,6 +86,7 @@ export default function AdminDashboard() {
                 <div>
                   <p className="text-xs uppercase tracking-[0.22em] text-slate-500">{t("institution")}</p>
                   <p className="text-lg font-semibold text-slate-900">{admin?.school_name || "-"}</p>
+                  <p className="text-sm text-slate-500">{t("schoolNumber")}: {admin?.school_no || "-"}</p>
                 </div>
               </div>
             </Card>

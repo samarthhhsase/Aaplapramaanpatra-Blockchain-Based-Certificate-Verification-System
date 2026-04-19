@@ -1,7 +1,9 @@
 const express = require('express');
 const { authenticate, authorizeRoles } = require('../middleware/auth');
+const { requireSchoolContext } = require('../middleware/schoolContext');
 const {
   getStudents,
+  getStudentDetails,
   issueCertificate,
   updateCertificateMarks,
   revokeCertificate,
@@ -16,10 +18,11 @@ const {
 
 const router = express.Router();
 
-router.use(authenticate, authorizeRoles('issuer'));
+router.use(authenticate, authorizeRoles('issuer'), requireSchoolContext);
 
 router.get('/dashboard/stats', getDashboardStats);
 router.get('/students', getStudents);
+router.get('/students/:id', getStudentDetails);
 router.post('/certificates', issueCertificate);
 router.put('/certificates/:certNo/marks', updateCertificateMarks);
 router.put('/certificates/:certNo', updateCertificateMarks);

@@ -44,6 +44,21 @@ function normalizeText(value) {
   return String(value || '').trim();
 }
 
+function mapStudentRecord(row) {
+  if (!row) {
+    return null;
+  }
+
+  return {
+    id: row.id,
+    name: row.name,
+    email: row.email || null,
+    roll_no: row.roll_no || null,
+    class_name: row.class_name || null,
+    class_div: row.class_div || null,
+  };
+}
+
 function formatIssueErrorMessage(stage, error, blockchainTxHash) {
   if (stage === 'blockchain_write') {
     return {
@@ -102,7 +117,7 @@ function normalizeCertificateLookupValue(value) {
   return { sql: 'c.certificate_no = ?', value: normalized };
 }
 
-async function getIssuerCertificateByLookup(lookupValue, issuerId, connection = pool) {
+async function getIssuerCertificateByLookup(lookupValue, issuerId, schoolId, connection = pool) {
   const lookup = normalizeCertificateLookupValue(lookupValue);
   if (!lookup) {
     return null;
@@ -135,9 +150,9 @@ async function getIssuerCertificateByLookup(lookupValue, issuerId, connection = 
      FROM certificates c
      JOIN students s ON c.student_id = s.id
      JOIN issuers i ON c.issuer_id = i.id
-     WHERE ${lookup.sql} AND c.issuer_id = ?
+     WHERE ${lookup.sql} AND c.issuer_id = ? AND c.school_id = ?
      LIMIT 1`,
-    [lookup.value, issuerId]
+    [lookup.value, issuerId, schoolId]
   );
 
   return rows[0] || null;
@@ -183,16 +198,59 @@ async function generateUniqueCertificateNo() {
 
 async function getStudents(req, res) {
   try {
+    const schoolId = Number(req.user?.schoolId || req.user?.school_id || 0);
     const [rows] = await pool.execute(
-      `SELECT s.id, s.name, u.email
+      `SELECT
+         s.id,
+         s.name,
+         u.email,
+         COALESCE(NULLIF(s.roll_no, ''), NULLIF(s.roll_number, '')) AS roll_no,
+         s.class_name,
+         s.class_div
        FROM students s
        JOIN users u ON s.user_id = u.id
+       WHERE s.school_id = ?
        ORDER BY s.created_at DESC`
+      ,
+      [schoolId]
     );
 
-    return res.status(200).json({ students: rows });
+    return res.status(200).json({ students: rows.map(mapStudentRecord) });
   } catch (error) {
     return res.status(500).json({ message: 'Failed to fetch students', error: error.message });
+  }
+}
+
+async function getStudentDetails(req, res) {
+  try {
+    const schoolId = Number(req.user?.schoolId || req.user?.school_id || 0);
+    const studentId = Number(req.params.id);
+    if (!Number.isInteger(studentId) || studentId <= 0) {
+      return res.status(400).json({ success: false, message: 'Valid student id is required' });
+    }
+
+    const [rows] = await pool.execute(
+      `SELECT
+         s.id,
+         s.name,
+         u.email,
+         COALESCE(NULLIF(s.roll_no, ''), NULLIF(s.roll_number, '')) AS roll_no,
+         s.class_name,
+         s.class_div
+       FROM students s
+       JOIN users u ON s.user_id = u.id
+       WHERE s.id = ? AND s.school_id = ?
+       LIMIT 1`,
+      [studentId, schoolId]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Student not found' });
+    }
+
+    return res.status(200).json({ success: true, student: mapStudentRecord(rows[0]) });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Failed to fetch student details', error: error.message });
   }
 }
 
@@ -211,6 +269,9 @@ async function issueCertificate(req, res) {
     const {
       studentId,
       student_name: studentNameFromClient,
+      student_email: studentEmailFromClient,
+      student_class_name: studentClassNameFromClient,
+      student_class_div: studentClassDivFromClient,
       course,
       grade,
       issueDate,
@@ -226,6 +287,7 @@ async function issueCertificate(req, res) {
     } = req.body || {};
 
     const issuerProfileId = Number(req.user?.profileId);
+    const issuerSchoolId = Number(req.user?.schoolId || req.user?.school_id || 0);
     const userRole = String(req.user?.role || '').trim().toLowerCase();
     const className = classNameFromClient || classNameLegacy;
     const trimmedStudentNameFromClient = normalizeText(studentNameFromClient);
@@ -258,7 +320,6 @@ async function issueCertificate(req, res) {
     }
 
     if (
-      !trimmedStudentNameFromClient ||
       !trimmedCourse ||
       !trimmedGrade ||
       !normalizeText(issueDate) ||
@@ -268,7 +329,7 @@ async function issueCertificate(req, res) {
     ) {
       return res.status(400).json({
         success: false,
-        message: 'student_name, course, grade, issueDate, class, studentType, and semester are required',
+        message: 'course, grade, issueDate, class, studentType, and semester are required',
       });
     }
 
@@ -311,7 +372,20 @@ async function issueCertificate(req, res) {
     }
 
     issueStage = 'verify_student';
-    const [studentRows] = await pool.execute('SELECT id, name FROM students WHERE id = ? LIMIT 1', [normalizedStudentId]);
+    const [studentRows] = await pool.execute(
+      `SELECT
+         s.id,
+         s.name,
+         u.email,
+         COALESCE(NULLIF(s.roll_no, ''), NULLIF(s.roll_number, '')) AS roll_no,
+         s.class_name,
+         s.class_div
+       FROM students s
+       JOIN users u ON s.user_id = u.id
+       WHERE s.id = ? AND s.school_id = ?
+       LIMIT 1`,
+      [normalizedStudentId, issuerSchoolId]
+    );
     console.info('[ISSUER][ISSUE] student lookup', {
       studentId: normalizedStudentId,
       resultCount: studentRows.length,
@@ -321,24 +395,22 @@ async function issueCertificate(req, res) {
     if (studentRows.length === 0) {
       return res.status(404).json({ success: false, message: 'Student not found' });
     }
-
-    const [studentEmailRows] = await pool.execute(
-      `SELECT u.email
-       FROM students s
-       JOIN users u ON s.user_id = u.id
-       WHERE s.id = ?
-       LIMIT 1`,
-      [normalizedStudentId]
-    );
+    const studentRecord = mapStudentRecord(studentRows[0]);
 
     issueStage = 'verify_issuer';
-    const [issuerRows] = await pool.execute('SELECT id, name FROM issuers WHERE id = ? LIMIT 1', [issuerProfileId]);
+    const [issuerRows] = await pool.execute(
+      'SELECT id, name FROM issuers WHERE id = ? AND school_id = ? LIMIT 1',
+      [issuerProfileId, issuerSchoolId]
+    );
     if (issuerRows.length === 0) {
       return res.status(404).json({ success: false, message: 'Issuer profile missing' });
     }
 
     const certNo = await generateUniqueCertificateNo();
-    const studentName = studentRows[0].name;
+    const studentName = normalizeText(studentNameFromClient) || studentRecord.name;
+    const studentEmail = toNullableText(studentEmailFromClient) || studentRecord.email;
+    const studentClassName = toNullableText(studentClassNameFromClient) || studentRecord.class_name;
+    const studentClassDiv = toNullableText(studentClassDivFromClient) || studentRecord.class_div;
     const issuerName = issuerRows[0].name;
     let normalizedRemarks;
     try {
@@ -371,10 +443,6 @@ async function issueCertificate(req, res) {
       certificateHash: generatedCertificateHash,
     });
 
-    if (trimmedStudentNameFromClient !== studentName) {
-      return res.status(400).json({ success: false, message: 'student_name does not match the selected student' });
-    }
-
     issueStage = 'blockchain_write';
     const chainReceipt = await blockchainService.issueCertificateOnChain({
       certificateHash,
@@ -399,6 +467,7 @@ async function issueCertificate(req, res) {
         certificate_no,
         student_id,
         issuer_id,
+        school_id,
         student_name,
         course,
         grade,
@@ -412,15 +481,19 @@ async function issueCertificate(req, res) {
         status,
         is_revoked,
         roll_no,
+        student_email,
+        student_class_name,
+        student_class_div,
         academic_year,
         certificate_type,
         remarks,
         overall_percentage
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         certNo,
         normalizedStudentId,
         issuerProfileId,
+        issuerSchoolId,
         studentName,
         trimmedCourse,
         trimmedGrade,
@@ -434,6 +507,9 @@ async function issueCertificate(req, res) {
         STATUS_VALID,
         false,
         normalizedRollNo,
+        studentEmail,
+        studentClassName,
+        studentClassDiv,
         normalizedAcademicYear,
         normalizedCertificateType,
         normalizedRemarks,
@@ -477,7 +553,8 @@ async function issueCertificate(req, res) {
         'ISSUE_CERTIFICATE',
         insertResult.insertId,
         JSON.stringify({
-          certificateNo: certNo,
+         certificateNo: certNo,
+          school_id: issuerSchoolId,
           studentId: normalizedStudentId,
           studentName,
           course: trimmedCourse,
@@ -487,6 +564,9 @@ async function issueCertificate(req, res) {
           studentType: normalizedMeta.studentType,
           semester: normalizedMeta.semester,
           roll_no: normalizedRollNo,
+          student_email: studentEmail,
+          student_class_name: studentClassName,
+          student_class_div: studentClassDiv,
           year: normalizedAcademicYear,
           certificate_type: normalizedCertificateType,
           remarks: normalizedRemarks,
@@ -506,6 +586,7 @@ async function issueCertificate(req, res) {
         id: insertResult.insertId,
         certificateNo: certNo,
         studentId: normalizedStudentId,
+        school_id: issuerSchoolId,
         studentName,
         course: trimmedCourse,
         grade: trimmedGrade,
@@ -515,6 +596,9 @@ async function issueCertificate(req, res) {
         semester: normalizedMeta.semester,
         issueDate: normalizedIssueDate,
         roll_no: normalizedRollNo,
+        student_email: studentEmail,
+        student_class_name: studentClassName,
+        student_class_div: studentClassDiv,
         year: normalizedAcademicYear,
         certificate_type: normalizedCertificateType,
         remarks: normalizedRemarks,
@@ -524,7 +608,7 @@ async function issueCertificate(req, res) {
         blockchainTxHash,
         ipfsHash: null,
         status: STATUS_VALID,
-        studentEmail: studentEmailRows[0]?.email || null,
+        studentEmail,
       },
     });
   } catch (error) {
@@ -569,6 +653,7 @@ async function updateCertificateMarks(req, res) {
   try {
     const lookupValue = req.params?.id || req.params?.certNo;
     const issuerId = Number(req.user?.profileId);
+    const schoolId = Number(req.user?.schoolId || req.user?.school_id || 0);
     const grade = normalizeText(req.body?.grade);
     const requestedSubjects = Array.isArray(req.body?.subjects) ? req.body.subjects : null;
 
@@ -587,7 +672,7 @@ async function updateCertificateMarks(req, res) {
     connection = await pool.getConnection();
     await connection.beginTransaction();
 
-    const certificate = await getIssuerCertificateByLookup(lookupValue, issuerId, connection);
+    const certificate = await getIssuerCertificateByLookup(lookupValue, issuerId, schoolId, connection);
     if (!certificate) {
       await connection.rollback();
       return res.status(404).json({ success: false, message: 'Certificate not found' });
@@ -785,6 +870,7 @@ async function revokeCertificate(req, res) {
   let blockchainWarning = null;
   try {
     const certNo = String(req.params?.certNo || '').trim();
+    const schoolId = Number(req.user?.schoolId || req.user?.school_id || 0);
     console.log('[ISSUER][REVOKE] request', {
       params: req.params,
       body: req.body,
@@ -797,8 +883,8 @@ async function revokeCertificate(req, res) {
     }
 
     const [rows] = await pool.execute(
-      'SELECT id, status FROM certificates WHERE certificate_no = ? AND issuer_id = ? LIMIT 1',
-      [certNo, req.user.profileId]
+      'SELECT id, status FROM certificates WHERE certificate_no = ? AND issuer_id = ? AND school_id = ? LIMIT 1',
+      [certNo, req.user.profileId, schoolId]
     );
     console.log('[ISSUER][REVOKE] lookup', { certNo, issuerId: req.user.profileId, rowCount: rows.length, rows });
 
@@ -860,6 +946,9 @@ async function getIssuedCertificates(req, res) {
          c.student_type,
          c.semester,
          c.roll_no,
+         c.student_email,
+         c.student_class_name,
+         c.student_class_div,
          c.academic_year,
          c.certificate_type,
          c.remarks,
@@ -870,14 +959,14 @@ async function getIssuedCertificates(req, res) {
          c.ipfs_hash,
          c.status,
          c.created_at,
-         s.name AS student_name,
-         u.email AS student_email
+         COALESCE(NULLIF(c.student_name, ''), s.name) AS student_name,
+         COALESCE(NULLIF(c.student_email, ''), u.email) AS student_email
        FROM certificates c
        JOIN students s ON c.student_id = s.id
        JOIN users u ON s.user_id = u.id
-       WHERE c.issuer_id = ?
+       WHERE c.issuer_id = ? AND c.school_id = ?
        ORDER BY c.created_at DESC`,
-      [req.user.profileId]
+      [req.user.profileId, req.user.schoolId]
     );
 
     const subjectsByCertificateId = await getSubjectsByCertificateIds(rows.map((row) => row.id));
@@ -886,6 +975,8 @@ async function getIssuedCertificates(req, res) {
       overall_percentage: row.overall_percentage === null ? null : roundToTwo(row.overall_percentage),
       year: row.academic_year,
       class_name: row.class,
+      student_class_name: row.student_class_name,
+      student_class_div: row.student_class_div,
       remarks: row.remarks,
       subjects: subjectsByCertificateId[row.id] || [],
     }));
@@ -898,22 +989,23 @@ async function getIssuedCertificates(req, res) {
 
 async function getDashboardStats(req, res) {
   try {
+    const schoolId = Number(req.user?.schoolId || req.user?.school_id || 0);
     const [issuedRows] = await pool.execute(
-      'SELECT COUNT(*) AS totalIssued FROM certificates WHERE issuer_id = ?',
-      [req.user.profileId]
+      'SELECT COUNT(*) AS totalIssued FROM certificates WHERE issuer_id = ? AND school_id = ?',
+      [req.user.profileId, schoolId]
     );
 
     const [revokedRows] = await pool.execute(
-      'SELECT COUNT(*) AS totalRevoked FROM certificates WHERE issuer_id = ? AND status = ?',
-      [req.user.profileId, STATUS_REVOKED]
+      'SELECT COUNT(*) AS totalRevoked FROM certificates WHERE issuer_id = ? AND school_id = ? AND status = ?',
+      [req.user.profileId, schoolId, STATUS_REVOKED]
     );
 
     const [complaintRows] = await pool.execute(
       `SELECT COUNT(*) AS totalComplaints
        FROM complaints cp
        JOIN certificates c ON cp.certificate_id = c.id
-       WHERE c.issuer_id = ?`,
-      [req.user.profileId]
+       WHERE c.issuer_id = ? AND c.school_id = ?`,
+      [req.user.profileId, schoolId]
     );
 
     return res.status(200).json({
@@ -931,6 +1023,7 @@ async function getDashboardStats(req, res) {
 async function downloadPdf(req, res) {
   try {
     const { certNo } = req.params;
+    const schoolId = Number(req.user?.schoolId || req.user?.school_id || 0);
 
     const [rows] = await pool.execute(
       `SELECT
@@ -956,9 +1049,9 @@ async function downloadPdf(req, res) {
        FROM certificates c
        JOIN students s ON c.student_id = s.id
        JOIN issuers i ON c.issuer_id = i.id
-       WHERE c.certificate_no = ? AND c.issuer_id = ?
+       WHERE c.certificate_no = ? AND c.issuer_id = ? AND c.school_id = ?
        LIMIT 1`,
-      [certNo, req.user.profileId]
+      [certNo, req.user.profileId, schoolId]
     );
 
     if (rows.length === 0) {
@@ -980,6 +1073,7 @@ async function downloadPdf(req, res) {
 
 async function getComplaints(req, res) {
   try {
+    const schoolId = Number(req.user?.schoolId || req.user?.school_id || 0);
     const [rows] = await pool.execute(
       `SELECT
          cp.id,
@@ -992,9 +1086,9 @@ async function getComplaints(req, res) {
        FROM complaints cp
        JOIN certificates c ON cp.certificate_id = c.id
        JOIN students s ON cp.student_id = s.id
-       WHERE c.issuer_id = ?
+       WHERE c.issuer_id = ? AND c.school_id = ?
        ORDER BY cp.created_at DESC`,
-      [req.user.profileId]
+      [req.user.profileId, schoolId]
     );
 
     return res.status(200).json({ complaints: rows });
@@ -1007,6 +1101,7 @@ async function resolveComplaint(req, res) {
   try {
     const { complaintId } = req.params;
     const { response } = req.body || {};
+    const schoolId = Number(req.user?.schoolId || req.user?.school_id || 0);
 
     if (!response || response.trim().length < 2) {
       return res.status(400).json({ message: 'response is required' });
@@ -1016,9 +1111,9 @@ async function resolveComplaint(req, res) {
       `SELECT cp.id, c.id AS certificate_id
        FROM complaints cp
        JOIN certificates c ON cp.certificate_id = c.id
-       WHERE cp.id = ? AND c.issuer_id = ?
+       WHERE cp.id = ? AND c.issuer_id = ? AND c.school_id = ?
        LIMIT 1`,
-      [complaintId, req.user.profileId]
+      [complaintId, req.user.profileId, schoolId]
     );
 
     if (rows.length === 0) {
@@ -1046,6 +1141,7 @@ async function deleteCertificate(req, res) {
   let connection;
   try {
     const certNo = String(req.params?.certNo || '').trim();
+    const schoolId = Number(req.user?.schoolId || req.user?.school_id || 0);
     console.log('[ISSUER][DELETE] request', {
       params: req.params,
       body: req.body,
@@ -1063,9 +1159,9 @@ async function deleteCertificate(req, res) {
     const [rows] = await connection.execute(
       `SELECT id, status
        FROM certificates
-       WHERE certificate_no = ? AND issuer_id = ?
+       WHERE certificate_no = ? AND issuer_id = ? AND school_id = ?
        LIMIT 1`,
-      [certNo, req.user.profileId]
+      [certNo, req.user.profileId, schoolId]
     );
     console.log('[ISSUER][DELETE] lookup', { certNo, issuerId: req.user.profileId, rowCount: rows.length, rows });
 
@@ -1127,6 +1223,7 @@ async function getAuditLogs(req, res) {
 
 module.exports = {
   getStudents,
+  getStudentDetails,
   issueCertificate,
   editCertificate,
   updateCertificateMarks,

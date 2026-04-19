@@ -7,6 +7,7 @@ import { authApi, getApiErrorMessage } from "../utils/api";
 
 const defaultForm = {
   school_name: "",
+  school_no: "",
   admin_name: "",
   login_id: "",
   email: "",
@@ -28,6 +29,10 @@ export default function AdminRegister() {
 
   const handleSubmit = async (event) => {
     event.preventDefault();
+    if (!/^\d{4}$/.test(form.school_no.trim())) {
+      setError(t("schoolNumberFourDigits"));
+      return;
+    }
     setLoading(true);
     setError("");
     setSuccess("");
@@ -77,6 +82,17 @@ export default function AdminRegister() {
             <div className="md:col-span-2">
               <label className="mb-2 block text-sm font-medium text-slate-700">{t("schoolName")}</label>
               <input className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-emerald-500" value={form.school_name} onChange={(event) => updateField("school_name", event.target.value)} required />
+            </div>
+            <div>
+              <label className="mb-2 block text-sm font-medium text-slate-700">{t("schoolNumber")}</label>
+              <input
+                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-emerald-500"
+                value={form.school_no}
+                onChange={(event) => updateField("school_no", event.target.value.replace(/\D/g, "").slice(0, 4))}
+                inputMode="numeric"
+                maxLength={4}
+                required
+              />
             </div>
             <div>
               <label className="mb-2 block text-sm font-medium text-slate-700">{t("adminName")}</label>

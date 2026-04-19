@@ -43,6 +43,19 @@ async function indexExists(tableName, indexName, connection = pool) {
   return Number(count) > 0;
 }
 
+async function constraintExists(tableName, constraintName, connection = pool) {
+  const count = await queryValue(
+    `SELECT COUNT(*)
+     FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME = ?
+       AND CONSTRAINT_NAME = ?`,
+    [tableName, constraintName],
+    connection
+  );
+  return Number(count) > 0;
+}
+
 async function getForeignKeys(tableName, connection = pool) {
   const [rows] = await connection.execute(
     `SELECT CONSTRAINT_NAME, COLUMN_NAME, REFERENCED_TABLE_NAME
@@ -88,6 +101,21 @@ async function ensureUsersTable(connection = pool) {
   await connection.execute('ALTER TABLE users MODIFY COLUMN role VARCHAR(20) NOT NULL');
 }
 
+async function ensureSchoolsTable(connection = pool) {
+  await connection.execute(`
+    CREATE TABLE IF NOT EXISTS schools (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      school_name VARCHAR(255) NOT NULL,
+      school_no CHAR(4) NOT NULL UNIQUE,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  await ensureColumn('schools', 'school_name', 'VARCHAR(255) NULL', connection);
+  await ensureColumn('schools', 'school_no', 'CHAR(4) NULL', connection);
+  await ensureColumn('schools', 'created_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP', connection);
+}
+
 async function ensureAdminsTable(connection = pool) {
   await connection.execute(`
     CREATE TABLE IF NOT EXISTS admins (
@@ -108,6 +136,8 @@ async function ensureAdminsTable(connection = pool) {
     );
     await connection.execute('ALTER TABLE admins MODIFY COLUMN email VARCHAR(150) NOT NULL');
   }
+
+  await ensureColumn('admins', 'school_id', 'INT NULL', connection);
 }
 
 async function ensureIssuersTable(connection = pool) {
@@ -126,6 +156,7 @@ async function ensureIssuersTable(connection = pool) {
   `);
 
   await ensureColumn('issuers', 'user_id', 'INT NULL UNIQUE', connection);
+  await ensureColumn('issuers', 'school_id', 'INT NULL', connection);
   await ensureColumn('issuers', 'admin_id', 'INT NULL', connection);
   await ensureColumn('issuers', 'name', 'VARCHAR(150) NULL', connection);
   await ensureColumn('issuers', 'email', 'VARCHAR(150) NULL', connection);
@@ -140,29 +171,48 @@ async function ensureStudentsTable(connection = pool) {
     CREATE TABLE IF NOT EXISTS students (
       id INT AUTO_INCREMENT PRIMARY KEY,
       user_id INT NOT NULL UNIQUE,
+      school_id INT NULL,
       name VARCHAR(150) NOT NULL,
       email VARCHAR(150) NOT NULL UNIQUE,
       password VARCHAR(255) NOT NULL,
       roll_number VARCHAR(60) NULL,
+      roll_no VARCHAR(60) NULL,
       course VARCHAR(220) NULL,
       class_name VARCHAR(50) NULL,
+      class_div VARCHAR(10) NULL,
       semester VARCHAR(20) NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `);
 
   await ensureColumn('students', 'user_id', 'INT NULL UNIQUE', connection);
+  await ensureColumn('students', 'school_id', 'INT NULL', connection);
   await ensureColumn('students', 'name', 'VARCHAR(150) NULL', connection);
   await ensureColumn('students', 'email', 'VARCHAR(150) NULL', connection);
   await ensureColumn('students', 'password', 'VARCHAR(255) NULL', connection);
   await ensureColumn('students', 'roll_number', 'VARCHAR(60) NULL', connection);
+  await ensureColumn('students', 'roll_no', 'VARCHAR(60) NULL', connection);
   await ensureColumn('students', 'course', 'VARCHAR(220) NULL', connection);
   await ensureColumn('students', 'class_name', 'VARCHAR(50) NULL', connection);
+  await ensureColumn('students', 'class_div', 'VARCHAR(10) NULL', connection);
   await ensureColumn('students', 'semester', 'VARCHAR(20) NULL', connection);
   await ensureColumn('students', 'created_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP', connection);
 
+  if (await columnExists('students', 'roll_number', connection)) {
+    await connection.execute(
+      `UPDATE students
+       SET roll_no = roll_number
+       WHERE (roll_no IS NULL OR TRIM(roll_no) = '')
+         AND roll_number IS NOT NULL
+         AND TRIM(roll_number) <> ''`
+    );
+  }
+
   if (!(await indexExists('students', 'uq_students_roll_number', connection))) {
     await connection.execute('ALTER TABLE students ADD UNIQUE KEY uq_students_roll_number (roll_number)');
+  }
+  if (!(await indexExists('students', 'uq_students_roll_no', connection))) {
+    await connection.execute('ALTER TABLE students ADD UNIQUE KEY uq_students_roll_no (roll_no)');
   }
 }
 
@@ -173,8 +223,12 @@ async function ensureCertificatesTable(connection = pool) {
       certificate_no VARCHAR(50) NOT NULL UNIQUE,
       student_id INT NULL,
       issuer_id INT NULL,
+      school_id INT NULL,
       student_name VARCHAR(150) NULL,
       roll_no VARCHAR(60) NULL,
+      student_email VARCHAR(150) NULL,
+      student_class_name VARCHAR(100) NULL,
+      student_class_div VARCHAR(20) NULL,
       course VARCHAR(220) NOT NULL,
       grade VARCHAR(40) NULL,
       class VARCHAR(10) NULL,
@@ -202,8 +256,12 @@ async function ensureCertificatesTable(connection = pool) {
 
   await ensureColumn('certificates', 'student_id', 'INT NULL', connection);
   await ensureColumn('certificates', 'issuer_id', 'INT NULL', connection);
+  await ensureColumn('certificates', 'school_id', 'INT NULL', connection);
   await ensureColumn('certificates', 'student_name', 'VARCHAR(150) NULL', connection);
   await ensureColumn('certificates', 'roll_no', 'VARCHAR(60) NULL', connection);
+  await ensureColumn('certificates', 'student_email', 'VARCHAR(150) NULL', connection);
+  await ensureColumn('certificates', 'student_class_name', 'VARCHAR(100) NULL', connection);
+  await ensureColumn('certificates', 'student_class_div', 'VARCHAR(20) NULL', connection);
   await ensureColumn('certificates', 'grade', 'VARCHAR(40) NULL', connection);
   await ensureColumn('certificates', 'class', 'VARCHAR(10) NULL', connection);
   await ensureColumn('certificates', 'student_type', 'VARCHAR(20) NULL', connection);
@@ -246,6 +304,75 @@ async function ensureCertificatesTable(connection = pool) {
      SET status = 'Valid'
      WHERE status IS NULL OR TRIM(status) = ''`
   );
+}
+
+async function ensureSchoolLinkages(connection = pool) {
+  const legacySchoolNo = '0000';
+  const legacySchoolName = 'Legacy School';
+
+  const [existingLegacyRows] = await connection.execute(
+    `SELECT id
+     FROM schools
+     WHERE school_no = ?
+     LIMIT 1`,
+    [legacySchoolNo]
+  );
+
+  let legacySchoolId = existingLegacyRows[0]?.id || null;
+  if (!legacySchoolId) {
+    const [insertResult] = await connection.execute(
+      `INSERT INTO schools (school_name, school_no)
+       VALUES (?, ?)`,
+      [legacySchoolName, legacySchoolNo]
+    );
+    legacySchoolId = insertResult.insertId;
+  }
+
+  await connection.execute(
+    `UPDATE admins
+     SET school_id = ?
+     WHERE school_id IS NULL`,
+    [legacySchoolId]
+  );
+  await connection.execute(
+    `UPDATE issuers
+     SET school_id = ?
+     WHERE school_id IS NULL`,
+    [legacySchoolId]
+  );
+  await connection.execute(
+    `UPDATE students
+     SET school_id = ?
+     WHERE school_id IS NULL`,
+    [legacySchoolId]
+  );
+  await connection.execute(
+    `UPDATE certificates
+     SET school_id = ?
+     WHERE school_id IS NULL`,
+    [legacySchoolId]
+  );
+
+  if (!(await constraintExists('admins', 'fk_admins_school_id', connection))) {
+    await connection.execute(
+      'ALTER TABLE admins ADD CONSTRAINT fk_admins_school_id FOREIGN KEY (school_id) REFERENCES schools(id) ON DELETE RESTRICT'
+    );
+  }
+  if (!(await constraintExists('issuers', 'fk_issuers_school_id', connection))) {
+    await connection.execute(
+      'ALTER TABLE issuers ADD CONSTRAINT fk_issuers_school_id FOREIGN KEY (school_id) REFERENCES schools(id) ON DELETE RESTRICT'
+    );
+  }
+  if (!(await constraintExists('students', 'fk_students_school_id', connection))) {
+    await connection.execute(
+      'ALTER TABLE students ADD CONSTRAINT fk_students_school_id FOREIGN KEY (school_id) REFERENCES schools(id) ON DELETE RESTRICT'
+    );
+  }
+  if (!(await constraintExists('certificates', 'fk_certificates_school_id', connection))) {
+    await connection.execute(
+      'ALTER TABLE certificates ADD CONSTRAINT fk_certificates_school_id FOREIGN KEY (school_id) REFERENCES schools(id) ON DELETE RESTRICT'
+    );
+  }
 }
 
 async function ensureCertificateSubjectsTable(connection = pool) {
@@ -305,10 +432,12 @@ async function ensureApplicationSchema() {
   try {
     console.info('[DB SCHEMA] Checking database schema compatibility');
     await ensureUsersTable(connection);
+    await ensureSchoolsTable(connection);
     await ensureAdminsTable(connection);
     await ensureIssuersTable(connection);
     await ensureStudentsTable(connection);
     await ensureCertificatesTable(connection);
+    await ensureSchoolLinkages(connection);
     await ensureCertificateSubjectsTable(connection);
     await ensureComplaintsTable(connection);
     await ensureAuditLogsTable(connection);

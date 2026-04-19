@@ -35,6 +35,8 @@ function isPublicAuthPath(url = "") {
     url.includes("/auth/register") ||
     url.includes("/admin/register") ||
     url.includes("/admin/login") ||
+    url.includes("/schools") ||
+    url.includes("/api/schools") ||
     url.includes("/public/") ||
     url.includes("/api/auth/login") ||
     url.includes("/api/auth/register") ||
@@ -152,6 +154,7 @@ export const authApi = {
   health: () => api.get("/health"),
   register: (payload) => api.post("/auth/register", payload),
   login: (payload) => api.post("/auth/login", payload),
+  schools: () => api.get("/schools"),
   adminRegister: (payload) => api.post("/admin/register", payload),
   adminLogin: (payload) => api.post("/admin/login", payload),
   adminProfile: () => api.get("/admin/profile"),

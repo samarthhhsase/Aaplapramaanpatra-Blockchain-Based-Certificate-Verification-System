@@ -25,6 +25,7 @@ async function verifyAdminToken(req, res, next) {
       ...decoded,
       id: adminId,
       adminId,
+      schoolId: decoded?.schoolId || decoded?.school_id || null,
     };
     return next();
   } catch (error) {
