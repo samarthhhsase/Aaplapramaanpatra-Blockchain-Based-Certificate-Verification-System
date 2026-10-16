@@ -94,6 +94,18 @@ function toPercentage(scored, outOf) {
   return Number(((scored / outOf) * 100).toFixed(2));
 }
 
+function calculateGrade(percentage) {
+  const p = Number(percentage);
+  if (!Number.isFinite(p) || p <= 0) return "";
+  if (p >= 90) return "A+";
+  if (p >= 80) return "A";
+  if (p >= 70) return "B+";
+  if (p >= 60) return "B";
+  if (p >= 50) return "C";
+  if (p >= 40) return "D";
+  return "F";
+}
+
 function calculateOverallPercentage(subjects) {
   const totals = subjects.reduce(
     (accumulator, subject) => ({
@@ -111,7 +123,6 @@ function validateIssueForm(issueForm, t) {
 
   if (!issueForm.studentId) errors.push(t("studentRequired"));
   if (!issueForm.course.trim()) errors.push(t("courseRequired"));
-  if (!issueForm.grade.trim()) errors.push(t("gradeRequired"));
   if (!issueForm.issueDate) errors.push(t("issueDateRequired"));
   if (!issueForm.rollNo.trim()) errors.push(t("rollNoRequired"));
   if (!issueForm.year.trim()) errors.push(t("yearRequired"));
@@ -212,6 +223,27 @@ export default function IssuerDashboard() {
     [calculatedEditSubjects]
   );
 
+  useEffect(() => {
+    if (overallPercentage > 0) {
+      const autoGrade = calculateGrade(overallPercentage);
+      setIssueForm((prev) => ({
+        ...prev,
+        grade: autoGrade,
+      }));
+    }
+  }, [overallPercentage]);
+
+  useEffect(() => {
+    if (editOverallPercentage > 0) {
+      const autoGrade = calculateGrade(editOverallPercentage);
+      setEditForm((prev) => ({
+        ...prev,
+        grade: autoGrade,
+      }));
+      setEditErrors((prev) => (prev.grade ? { ...prev, grade: "" } : prev));
+    }
+  }, [editOverallPercentage]);
+
   const fetchAll = async () => {
     setLoading(true);
     setError("");
@@ -253,6 +285,7 @@ export default function IssuerDashboard() {
             studentName: "",
             studentEmail: "",
             rollNo: "",
+            course: "",
             studentClassName: "",
             studentClassDiv: "",
           }));
@@ -275,11 +308,12 @@ export default function IssuerDashboard() {
         if (isMounted) {
           setIssueForm((prev) => ({
             ...prev,
-            studentName: student.name || "",
-            studentEmail: student.email || "",
-            rollNo: student.roll_no || "",
-            studentClassName: student.class_name || "",
-            studentClassDiv: student.class_div || "",
+            studentName: student.name || prev.studentName || "",
+            studentEmail: student.email || prev.studentEmail || "",
+            rollNo: student.roll_no || prev.rollNo || "",
+            course: student.course || prev.course || "AIDS",
+            studentClassName: student.class_name || prev.studentClassName || "",
+            studentClassDiv: student.class_div || prev.studentClassDiv || "",
           }));
         }
       } catch (err) {
@@ -393,7 +427,7 @@ export default function IssuerDashboard() {
         student_name: issueForm.studentName.trim(),
         student_email: issueForm.studentEmail.trim(),
         course: issueForm.course.trim(),
-        grade: issueForm.grade.trim(),
+        grade: issueForm.grade.trim() || calculateGrade(overallPercentage),
         issueDate: issueForm.issueDate,
         roll_no: issueForm.rollNo.trim(),
         student_class_name: issueForm.studentClassName.trim(),
@@ -747,11 +781,44 @@ export default function IssuerDashboard() {
 
           <form className="space-y-6" onSubmit={issueCertificate}>
             <div className="dashboard-form-grid">
-            <Input label={t("student")} as="select" value={issueForm.studentId} onChange={(event) => updateIssue("studentId", event.target.value)} required>
+            <Input
+              label={t("student")}
+              as="select"
+              value={issueForm.studentId}
+              onChange={(event) => {
+                const selectedId = event.target.value;
+                if (!selectedId) {
+                  setIssueForm((prev) => ({
+                    ...prev,
+                    studentId: "",
+                    studentName: "",
+                    studentEmail: "",
+                    rollNo: "",
+                    course: "",
+                    studentClassName: "",
+                    studentClassDiv: "",
+                  }));
+                  return;
+                }
+
+                const matched = students.find((s) => String(s.id) === String(selectedId));
+                setIssueForm((prev) => ({
+                  ...prev,
+                  studentId: selectedId,
+                  studentName: matched?.name || "",
+                  studentEmail: matched?.email || "",
+                  rollNo: matched?.roll_no || "",
+                  course: matched?.course || "AIDS",
+                  studentClassName: matched?.class_name || "",
+                  studentClassDiv: matched?.class_div || "",
+                }));
+              }}
+              required
+            >
               <option value="">{t("selectStudent")}</option>
               {students.map((student) => (
                 <option key={student.id} value={student.id}>
-                  {student.name} {student.roll_no ? `| ${student.roll_no}` : ""} {student.email ? `| ${student.email}` : ""}
+                  {student.name} {student.roll_no ? `| Roll: ${student.roll_no}` : ""} {student.course ? `| ${student.course}` : ""} {student.email ? `| ${student.email}` : ""}
                 </option>
               ))}
             </Input>
@@ -788,8 +855,7 @@ export default function IssuerDashboard() {
               onChange={(event) => updateIssue("studentClassDiv", event.target.value.toUpperCase())}
               placeholder={t("enterClassDivision")}
             />
-            <Input label={t("course")} value={issueForm.course} onChange={(event) => updateIssue("course", event.target.value)} required />
-            <Input label="Grade" value={issueForm.grade} onChange={(event) => updateIssue("grade", event.target.value)} required />
+            <Input label={t("course")} value={issueForm.course} onChange={(event) => updateIssue("course", event.target.value)} placeholder={t("enterCourse") || "e.g. AIDS, Computer Engineering"} required />
             <Input label={t("issueDate")} type="date" value={issueForm.issueDate} onChange={(event) => updateIssue("issueDate", event.target.value)} required />
             <Input label={t("year")} value={issueForm.year} onChange={(event) => updateIssue("year", event.target.value)} placeholder="2025-2026" required />
             <Input
@@ -899,8 +965,13 @@ export default function IssuerDashboard() {
                       />
                       <div className="space-y-1.5">
                         <p className="text-sm font-medium text-slate-700">{t("subjectPercentage")}</p>
-                        <div className="flex min-h-[46px] items-center rounded-xl border border-emerald-200 bg-emerald-50 px-4 text-sm font-semibold text-emerald-700">
-                          {subject.subject_percentage.toFixed(2)}%
+                        <div className="flex min-h-[46px] items-center justify-between rounded-xl border border-emerald-200 bg-emerald-50 px-4 text-sm font-semibold text-emerald-700">
+                          <span>{subject.subject_percentage.toFixed(2)}%</span>
+                          {subject.subject_percentage > 0 ? (
+                            <span className="rounded-md bg-emerald-200/80 px-2 py-0.5 text-xs font-bold text-emerald-800">
+                              {calculateGrade(subject.subject_percentage)}
+                            </span>
+                          ) : null}
                         </div>
                       </div>
                     </div>
@@ -908,7 +979,7 @@ export default function IssuerDashboard() {
                 ))}
               </div>
 
-              <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-3">
+              <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
                 <div className="rounded-[20px] border border-slate-200 bg-white px-4 py-4">
                   <p className="text-xs uppercase tracking-wide text-slate-500">{t("student")}</p>
                   <p className="mt-1 text-sm font-semibold text-slate-900">{issueForm.studentName || selectedStudent?.name || t("selectAStudent")}</p>
@@ -923,6 +994,12 @@ export default function IssuerDashboard() {
                 <div className="rounded-[20px] border border-cyan-200 bg-cyan-50 px-4 py-4">
                   <p className="text-xs uppercase tracking-wide text-cyan-700">{t("overallPercentage")}</p>
                   <p className="mt-1 text-lg font-extrabold text-cyan-900">{overallPercentage.toFixed(2)}%</p>
+                </div>
+                <div className="rounded-[20px] border border-indigo-200 bg-indigo-50 px-4 py-4">
+                  <p className="text-xs uppercase tracking-wide text-indigo-700">{t("grade")}</p>
+                  <p className="mt-1 text-lg font-extrabold text-indigo-900">
+                    {issueForm.grade || (overallPercentage > 0 ? calculateGrade(overallPercentage) : "-")}
+                  </p>
                 </div>
               </div>
             </div>
@@ -1157,11 +1234,19 @@ export default function IssuerDashboard() {
                   <Button variant="secondary" className="px-4 py-2 text-sm" onClick={addEditSubjectRow}>
                     <FaPlusCircle /> Add Subject
                   </Button>
-                  <div className="rounded-2xl border border-cyan-200 bg-cyan-50 px-4 py-3 text-right">
-                    <p className="text-xs uppercase tracking-[0.18em] text-cyan-700">Updated Overall</p>
-                    <p className="mt-1 text-lg font-extrabold text-cyan-900">
-                      {calculatedEditSubjects.length > 0 ? `${editOverallPercentage.toFixed(2)}%` : "-"}
-                    </p>
+                  <div className="flex gap-2">
+                    <div className="rounded-2xl border border-cyan-200 bg-cyan-50 px-4 py-3 text-right">
+                      <p className="text-xs uppercase tracking-[0.18em] text-cyan-700">Updated Overall</p>
+                      <p className="mt-1 text-lg font-extrabold text-cyan-900">
+                        {calculatedEditSubjects.length > 0 ? `${editOverallPercentage.toFixed(2)}%` : "-"}
+                      </p>
+                    </div>
+                    <div className="rounded-2xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-right">
+                      <p className="text-xs uppercase tracking-[0.18em] text-indigo-700">Auto Grade</p>
+                      <p className="mt-1 text-lg font-extrabold text-indigo-900">
+                        {editForm.grade || (editOverallPercentage > 0 ? calculateGrade(editOverallPercentage) : "-")}
+                      </p>
+                    </div>
                   </div>
                 </div>
 

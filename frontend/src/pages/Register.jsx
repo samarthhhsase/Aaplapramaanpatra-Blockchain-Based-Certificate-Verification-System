@@ -21,6 +21,7 @@ export default function Register() {
     school_name: "",
     school_no: "",
     roll_no: "",
+    course: "",
     class_name: "",
     class_div: "",
     role: localStorage.getItem(ROLE_STORAGE_KEY) || "student",
@@ -141,7 +142,7 @@ export default function Register() {
     }
 
     if (form.role === "student") {
-      if (!form.roll_no.trim() || !form.class_name.trim() || !form.class_div.trim()) {
+      if (!form.roll_no.trim() || !form.course.trim() || !form.class_name.trim() || !form.class_div.trim()) {
         setError(t("studentRegistrationFieldsRequired"));
         return;
       }
@@ -156,6 +157,7 @@ export default function Register() {
         password: form.password,
         role: form.role,
         roll_no: form.role === "student" ? form.roll_no : "",
+        course: form.role === "student" ? form.course : "",
         class_name: form.role === "student" ? form.class_name : "",
         class_div: form.role === "student" ? form.class_div : "",
         school_id: manualSchoolEntry ? "" : form.school_id,
@@ -359,6 +361,19 @@ export default function Register() {
                   onChange={(event) => updateField("roll_no", event.target.value)}
                   required={form.role === "student"}
                   placeholder={t("enterRollNumber")}
+                />
+              </div>
+
+              <div>
+                <label className="mb-2 block text-sm font-medium text-white" htmlFor="course">{t("course")}</label>
+                <input
+                  id="course"
+                  type="text"
+                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 outline-none transition focus:border-indigo-500"
+                  value={form.course}
+                  onChange={(event) => updateField("course", event.target.value)}
+                  placeholder={t("enterCourse")}
+                  required={form.role === "student"}
                 />
               </div>
 

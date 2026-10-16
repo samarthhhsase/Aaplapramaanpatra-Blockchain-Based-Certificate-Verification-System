@@ -180,7 +180,7 @@ export default function ManageStudents() {
               <Input label="Email / Login" type="email" value={form.email} onChange={(event) => setForm((prev) => ({ ...prev, email: event.target.value }))} required />
               <Input label={editingId ? "Password (leave blank to keep current)" : "Password"} type="password" value={form.password} onChange={(event) => setForm((prev) => ({ ...prev, password: event.target.value }))} required={!editingId} />
               <Input label="Roll Number" value={form.roll_number} onChange={(event) => setForm((prev) => ({ ...prev, roll_number: event.target.value }))} required />
-              <Input label="Course" value={form.course} onChange={(event) => setForm((prev) => ({ ...prev, course: event.target.value }))} />
+              <Input label="Course" value={form.course} onChange={(event) => setForm((prev) => ({ ...prev, course: event.target.value }))} placeholder="e.g. AIDS, Computer Engineering" required />
               <Input label="Class" value={form.class_name} onChange={(event) => setForm((prev) => ({ ...prev, class_name: event.target.value }))} />
               <Input label="Division" value={form.class_div} onChange={(event) => setForm((prev) => ({ ...prev, class_div: event.target.value.toUpperCase() }))} />
               <Input label="Semester" value={form.semester} onChange={(event) => setForm((prev) => ({ ...prev, semester: event.target.value }))} />

@@ -208,6 +208,20 @@ async function ensureStudentsTable(connection = pool) {
     );
   }
 
+  if (await columnExists('students', 'course', connection)) {
+    await connection.execute(
+      `UPDATE students s
+       SET s.course = COALESCE(
+         NULLIF(s.course, ''),
+         (SELECT c.course FROM certificates c WHERE c.student_id = s.id AND c.course IS NOT NULL AND TRIM(c.course) <> '' ORDER BY c.id DESC LIMIT 1),
+         (SELECT c.course FROM certificates c WHERE c.school_id = s.school_id AND c.course IS NOT NULL AND TRIM(c.course) <> '' ORDER BY c.id DESC LIMIT 1),
+         'AIDS'
+       )
+       WHERE s.course IS NULL OR TRIM(s.course) = ''`
+    );
+  }
+
+
   if (!(await indexExists('students', 'uq_students_roll_number', connection))) {
     await connection.execute('ALTER TABLE students ADD UNIQUE KEY uq_students_roll_number (roll_number)');
   }

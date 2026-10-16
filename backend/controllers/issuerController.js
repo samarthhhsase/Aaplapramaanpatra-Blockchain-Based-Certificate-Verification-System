@@ -2,7 +2,7 @@ const pool = require('../db');
 const { generateCertificateNumber } = require('../utils/certificateNumber');
 const { computeCertificateHash } = require('../utils/hash');
 const { getSubjectsByCertificateIds } = require('../utils/certificateSubjects');
-const { normalizeSubjects, calculateOverallPercentage, roundToTwo } = require('../utils/marks');
+const { normalizeSubjects, calculateOverallPercentage, roundToTwo, calculateGrade } = require('../utils/marks');
 const blockchainService = require('../services/blockchainService');
 const { buildCertificatePdf } = require('../services/pdfService');
 const { logAudit } = require('../utils/auditLog');
@@ -54,6 +54,7 @@ function mapStudentRecord(row) {
     name: row.name,
     email: row.email || null,
     roll_no: row.roll_no || null,
+    course: row.course || 'AIDS',
     class_name: row.class_name || null,
     class_div: row.class_div || null,
   };
@@ -205,6 +206,12 @@ async function getStudents(req, res) {
          s.name,
          u.email,
          COALESCE(NULLIF(s.roll_no, ''), NULLIF(s.roll_number, '')) AS roll_no,
+         COALESCE(
+           NULLIF(s.course, ''),
+           (SELECT c.course FROM certificates c WHERE c.student_id = s.id AND c.course IS NOT NULL AND TRIM(c.course) <> '' ORDER BY c.id DESC LIMIT 1),
+           (SELECT c.course FROM certificates c WHERE c.school_id = s.school_id AND c.course IS NOT NULL AND TRIM(c.course) <> '' ORDER BY c.id DESC LIMIT 1),
+           'AIDS'
+         ) AS course,
          s.class_name,
          s.class_div
        FROM students s
@@ -235,6 +242,12 @@ async function getStudentDetails(req, res) {
          s.name,
          u.email,
          COALESCE(NULLIF(s.roll_no, ''), NULLIF(s.roll_number, '')) AS roll_no,
+         COALESCE(
+           NULLIF(s.course, ''),
+           (SELECT c.course FROM certificates c WHERE c.student_id = s.id AND c.course IS NOT NULL AND TRIM(c.course) <> '' ORDER BY c.id DESC LIMIT 1),
+           (SELECT c.course FROM certificates c WHERE c.school_id = s.school_id AND c.course IS NOT NULL AND TRIM(c.course) <> '' ORDER BY c.id DESC LIMIT 1),
+           'AIDS'
+         ) AS course,
          s.class_name,
          s.class_div
        FROM students s
@@ -292,7 +305,7 @@ async function issueCertificate(req, res) {
     const className = classNameFromClient || classNameLegacy;
     const trimmedStudentNameFromClient = normalizeText(studentNameFromClient);
     const trimmedCourse = normalizeText(course);
-    const trimmedGrade = normalizeText(grade);
+    let trimmedGrade = normalizeText(grade);
     const normalizedRollNo = normalizeText(rollNo);
     const normalizedAcademicYear = normalizeText(year);
     const normalizedCertificateType = normalizeText(certificateType);
@@ -318,6 +331,17 @@ async function issueCertificate(req, res) {
     if (!Number.isInteger(normalizedStudentId) || normalizedStudentId <= 0) {
       return res.status(400).json({ success: false, message: 'studentId is required' });
     }
+
+    let normalizedSubjects;
+    let validatedOverallPercentage;
+    try {
+      normalizedSubjects = normalizeSubjects(subjects);
+      validatedOverallPercentage = calculateOverallPercentage(normalizedSubjects);
+    } catch (error) {
+      return res.status(400).json({ success: false, message: error.message, error: error.message });
+    }
+
+    trimmedGrade = trimmedGrade || (validatedOverallPercentage > 0 ? calculateGrade(validatedOverallPercentage) : '');
 
     if (
       !trimmedCourse ||
@@ -362,15 +386,6 @@ async function issueCertificate(req, res) {
       return res.status(400).json({ success: false, message: 'semester must be one of I, II, III, IV, V, VI, VII, VIII' });
     }
 
-    let normalizedSubjects;
-    let validatedOverallPercentage;
-    try {
-      normalizedSubjects = normalizeSubjects(subjects);
-      validatedOverallPercentage = calculateOverallPercentage(normalizedSubjects);
-    } catch (error) {
-      return res.status(400).json({ success: false, message: error.message, error: error.message });
-    }
-
     issueStage = 'verify_student';
     const [studentRows] = await pool.execute(
       `SELECT
@@ -378,6 +393,7 @@ async function issueCertificate(req, res) {
          s.name,
          u.email,
          COALESCE(NULLIF(s.roll_no, ''), NULLIF(s.roll_number, '')) AS roll_no,
+         s.course,
          s.class_name,
          s.class_div
        FROM students s
@@ -544,6 +560,13 @@ async function issueCertificate(req, res) {
       )
     );
 
+    await connection.execute(
+      `UPDATE students
+       SET course = ?
+       WHERE id = ? AND (course IS NULL OR TRIM(course) = '')`,
+      [trimmedCourse, normalizedStudentId]
+    );
+
     issueStage = 'audit_log';
     await connection.execute(
       `INSERT INTO audit_logs (user_id, action, certificate_id, old_data, new_data)
@@ -654,15 +677,11 @@ async function updateCertificateMarks(req, res) {
     const lookupValue = req.params?.id || req.params?.certNo;
     const issuerId = Number(req.user?.profileId);
     const schoolId = Number(req.user?.schoolId || req.user?.school_id || 0);
-    const grade = normalizeText(req.body?.grade);
+    let grade = normalizeText(req.body?.grade);
     const requestedSubjects = Array.isArray(req.body?.subjects) ? req.body.subjects : null;
 
     if (!Number.isInteger(issuerId) || issuerId <= 0) {
       return res.status(401).json({ success: false, message: 'Unauthorized: issuer profile missing' });
-    }
-
-    if (!grade) {
-      return res.status(400).json({ success: false, message: 'grade is required' });
     }
 
     if (!requestedSubjects || requestedSubjects.length === 0) {
@@ -743,6 +762,10 @@ async function updateCertificateMarks(req, res) {
     } catch (error) {
       await connection.rollback();
       return res.status(400).json({ success: false, message: error.message, error: error.message });
+    }
+
+    if (!grade) {
+      grade = calculateGrade(nextOverallPercentage);
     }
 
     const normalizedIssueDate = normalizeDate(certificate.issue_date);

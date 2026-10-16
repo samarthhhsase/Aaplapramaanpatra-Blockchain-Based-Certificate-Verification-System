@@ -34,19 +34,21 @@ function profileTableForRole(role) {
 async function register(req, res) {
   let connection;
   try {
-    const { name, username, email, password, role, roll_no, class_name, class_div, school_id, school_name, school_no } = req.body || {};
+    const { name, username, email, password, role, roll_no, class_name, class_div, course, school_id, school_name, school_no } = req.body || {};
     const normalizedName = (name || username || '').trim();
     const normalizedEmail = (email || '').trim().toLowerCase();
     const normalizedRole = (role || 'student').trim().toLowerCase();
     const normalizedRollNo = String(roll_no || '').trim();
     const normalizedClassName = String(class_name || '').trim();
     const normalizedClassDiv = String(class_div || '').trim().toUpperCase();
+    const normalizedCourse = String(course || '').trim();
     const normalizedSchoolId = Number(school_id);
     console.info(`[AUTH][REGISTER][${normalizedRole || 'unknown'}] request`, {
       name: normalizedName,
       email: normalizedEmail,
       role: normalizedRole,
       roll_no: normalizedRollNo,
+      course: normalizedCourse,
       class_name: normalizedClassName,
       class_div: normalizedClassDiv,
       school_id: normalizedSchoolId || null,
@@ -68,11 +70,11 @@ async function register(req, res) {
 
     if (
       normalizedRole === 'student' &&
-      (!normalizedRollNo || !normalizedClassName || !normalizedClassDiv)
+      (!normalizedRollNo || !normalizedCourse || !normalizedClassName || !normalizedClassDiv)
     ) {
       return res.status(400).json({
         success: false,
-        message: 'Roll number, class name, and class division are required for student registration',
+        message: 'Roll number, course, class name, and class division are required for student registration',
       });
     }
 
@@ -153,8 +155,8 @@ async function register(req, res) {
       );
     } else {
       await connection.execute(
-        `INSERT INTO students (user_id, school_id, name, email, password, roll_number, roll_no, class_name, class_div)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO students (user_id, school_id, name, email, password, roll_number, roll_no, course, class_name, class_div)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           userId,
           school.id,
@@ -163,6 +165,7 @@ async function register(req, res) {
           hashedPassword,
           normalizedRollNo,
           normalizedRollNo,
+          normalizedCourse || 'AIDS',
           normalizedClassName,
           normalizedClassDiv,
         ]
@@ -198,6 +201,7 @@ async function register(req, res) {
         school_name: school.school_name,
         school_no: school.school_no,
         roll_no: normalizedRole === 'student' ? normalizedRollNo : null,
+        course: normalizedRole === 'student' ? (normalizedCourse || null) : null,
         class_name: normalizedRole === 'student' ? normalizedClassName : null,
         class_div: normalizedRole === 'student' ? normalizedClassDiv : null,
         dashboardRoute: dashboardPathForRole(normalizedRole),

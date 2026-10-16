@@ -571,7 +571,11 @@ async function getStudents(req, res) {
          s.email,
          s.roll_number,
          s.roll_no,
-         s.course,
+         COALESCE(
+           NULLIF(s.course, ''),
+           (SELECT c.course FROM certificates c WHERE c.student_id = s.id AND c.course IS NOT NULL AND TRIM(c.course) <> '' ORDER BY c.id DESC LIMIT 1),
+           'AIDS'
+         ) AS course,
          s.class_name,
          s.class_div,
          s.semester,
@@ -606,7 +610,11 @@ async function getStudentDetails(req, res) {
          s.name AS student_name,
          s.email,
          s.roll_number,
-         s.course,
+         COALESCE(
+           NULLIF(s.course, ''),
+           (SELECT c.course FROM certificates c WHERE c.student_id = s.id AND c.course IS NOT NULL AND TRIM(c.course) <> '' ORDER BY c.id DESC LIMIT 1),
+           'AIDS'
+         ) AS course,
          s.class_name,
          s.semester,
          s.created_at
@@ -652,7 +660,7 @@ async function createStudent(req, res) {
     const email = normalizeEmail(req.body?.email);
     const password = req.body?.password;
     const rollNumber = normalizeNullable(req.body?.roll_number);
-    const course = normalizeNullable(req.body?.course);
+    const course = normalizeNullable(req.body?.course) || 'AIDS';
     const className = normalizeNullable(req.body?.class_name || req.body?.class);
     const classDiv = normalizeNullable(req.body?.class_div);
     const semester = normalizeNullable(req.body?.semester);
@@ -748,7 +756,7 @@ async function updateStudent(req, res) {
     const email = normalizeEmail(req.body?.email);
     const password = req.body?.password;
     const rollNumber = normalizeNullable(req.body?.roll_number);
-    const course = normalizeNullable(req.body?.course);
+    const courseInput = normalizeNullable(req.body?.course);
     const className = normalizeNullable(req.body?.class_name || req.body?.class);
     const classDiv = normalizeNullable(req.body?.class_div);
     const semester = normalizeNullable(req.body?.semester);
@@ -784,6 +792,7 @@ async function updateStudent(req, res) {
     }
 
     const student = studentRows[0];
+    const course = courseInput || student.course || 'AIDS';
     const [emailConflict] = await connection.execute(
       'SELECT id FROM users WHERE email = ? AND id <> ? LIMIT 1',
       [email, student.user_id]
